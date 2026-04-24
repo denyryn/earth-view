@@ -1,12 +1,9 @@
 import { Vector3 } from "three";
-import type { BoundingBox, ZoomLevel } from "@/types/imagery";
+import type { BoundingBox } from "@/types/imagery";
 
-export const ZOOM_LEVELS: Record<ZoomLevel, { label: string; size: number }> = {
-  continental: { label: "Continental", size: 10 },
-  regional: { label: "Regional", size: 2 },
-  local: { label: "Local", size: 0.2 },
-  pinpoint: { label: "Pinpoint", size: 0.05 },
-};
+export const IMAGERY_ZOOM_MIN_DEGREES = 0.03;
+export const IMAGERY_ZOOM_MAX_DEGREES = 12;
+export const DEFAULT_IMAGERY_ZOOM_DEGREES = 2;
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -41,6 +38,37 @@ export function bboxFromPoint(lat: number, lon: number, size: number): BoundingB
     minLon: clamp(lon - half, -180, 180),
     maxLon: clamp(lon + half, -180, 180),
   };
+}
+
+export function zoomPercentToDegrees(value: number) {
+  const clamped = clamp(value, 0, 100);
+  const min = Math.log(IMAGERY_ZOOM_MIN_DEGREES);
+  const max = Math.log(IMAGERY_ZOOM_MAX_DEGREES);
+  const next = max - (clamped / 100) * (max - min);
+
+  return Number(Math.exp(next).toFixed(4));
+}
+
+export function degreesToZoomPercent(degrees: number) {
+  const clamped = clamp(degrees, IMAGERY_ZOOM_MIN_DEGREES, IMAGERY_ZOOM_MAX_DEGREES);
+  const min = Math.log(IMAGERY_ZOOM_MIN_DEGREES);
+  const max = Math.log(IMAGERY_ZOOM_MAX_DEGREES);
+
+  return Math.round(((max - Math.log(clamped)) / (max - min)) * 100);
+}
+
+export function formatApproxDistance(sizeDegrees: number) {
+  const kilometers = sizeDegrees * 111;
+
+  if (kilometers >= 100) {
+    return `${Math.round(kilometers).toLocaleString()} km`;
+  }
+
+  if (kilometers >= 10) {
+    return `${kilometers.toFixed(1)} km`;
+  }
+
+  return `${kilometers.toFixed(2)} km`;
 }
 
 export function formatCoordinates(lat: number, lon: number) {

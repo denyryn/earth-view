@@ -7,7 +7,11 @@ type GibsLayerConfig = {
   layerId: string;
   name: string;
   satellite: string;
+  category: string;
   resolution: number;
+  summary: string;
+  bestFor: string;
+  caveat: string;
 };
 
 function bboxParam(bbox: BoundingBox) {
@@ -34,11 +38,11 @@ export function buildGibsWmsUrl(layerId: string, params: ImageryRequest) {
   return `${GIBS_WMS_URL}?${search.toString()}`;
 }
 
-export function buildGlobalGibsTextureUrl(date: string) {
+export function buildGlobalGibsTextureUrl(date: string, width = 4096) {
   return buildGibsWmsUrl("VIIRS_SNPP_CorrectedReflectance_TrueColor", {
     date,
-    width: 2048,
-    height: 1024,
+    width,
+    height: width / 2,
     bbox: {
       minLat: -90,
       minLon: -180,
@@ -53,7 +57,11 @@ export class GibsProvider implements ImageryProvider {
   layerId: string;
   name: string;
   satellite: string;
+  category: string;
   resolution: number;
+  summary: string;
+  bestFor: string;
+  caveat: string;
   requiresAuth = false;
 
   constructor(config: GibsLayerConfig) {
@@ -61,7 +69,11 @@ export class GibsProvider implements ImageryProvider {
     this.layerId = config.layerId;
     this.name = config.name;
     this.satellite = config.satellite;
+    this.category = config.category;
     this.resolution = config.resolution;
+    this.summary = config.summary;
+    this.bestFor = config.bestFor;
+    this.caveat = config.caveat;
   }
 
   async fetchImage(params: ImageryRequest) {

@@ -5,8 +5,6 @@ export type BoundingBox = {
   maxLon: number;
 };
 
-export type ZoomLevel = "continental" | "regional" | "local" | "pinpoint";
-
 export type ImageryRequest = {
   bbox: BoundingBox;
   date: string;
@@ -19,7 +17,11 @@ export interface ImageryProvider {
   layerId: string;
   name: string;
   satellite: string;
+  category: string;
   resolution: number;
   requiresAuth: boolean;
+  summary: string;
+  bestFor: string;
+  caveat: string;
   fetchImage(params: ImageryRequest): Promise<string | Blob>;
 }

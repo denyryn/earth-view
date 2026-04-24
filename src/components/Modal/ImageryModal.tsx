@@ -7,11 +7,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { bboxFromPoint, formatCoordinates, ZOOM_LEVELS } from "@/lib/geo";
+import { bboxFromPoint, formatCoordinates } from "@/lib/geo";
 import { formatLongDate } from "@/lib/dates";
 import { getImageryProvider } from "@/providers/registry";
 import { useAppStore } from "@/store/useAppStore";
 import { DatePicker } from "./DatePicker";
+import { ImageryInfoButton, ImageryInfoModal } from "./ImageryInfoModal";
 import { LayerSwitcher } from "./LayerSwitcher";
 import { ZoomControl } from "./ZoomControl";
 
@@ -21,15 +22,17 @@ export function ImageryModal() {
     modalOpen,
     date,
     layerId,
-    zoomLevel,
+    imageryZoomDegrees,
     closeModal,
     setDate,
     setLayer,
-    setZoomLevel,
+    setImageryZoomDegrees,
   } = useAppStore();
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [previewZoomDegrees, setPreviewZoomDegrees] = useState(imageryZoomDegrees);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   const provider = getImageryProvider(layerId);
   const bbox = useMemo(() => {
@@ -37,8 +40,8 @@ export function ImageryModal() {
       return null;
     }
 
-    return bboxFromPoint(selectedPoint.lat, selectedPoint.lon, ZOOM_LEVELS[zoomLevel].size);
-  }, [selectedPoint, zoomLevel]);
+    return bboxFromPoint(selectedPoint.lat, selectedPoint.lon, imageryZoomDegrees);
+  }, [imageryZoomDegrees, selectedPoint]);
 
   useEffect(() => {
     if (!modalOpen || !bbox) {
@@ -75,22 +78,33 @@ export function ImageryModal() {
     };
   }, [bbox, date, modalOpen, provider]);
 
+  useEffect(() => {
+    if (modalOpen) {
+      setPreviewZoomDegrees(imageryZoomDegrees);
+    }
+  }, [imageryZoomDegrees, modalOpen]);
+
   const coordinates = selectedPoint
     ? formatCoordinates(selectedPoint.lat, selectedPoint.lon)
     : "";
+  const imagePreviewScale = imageryZoomDegrees / previewZoomDegrees;
 
   return (
     <Dialog open={modalOpen} onOpenChange={(open) => !open && closeModal()}>
       <DialogContent data-testid="imagery-modal">
         <div className="grid max-h-[92dvh] grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]">
-          <div className="relative min-h-[360px] bg-black lg:min-h-[680px]">
+          <div className="relative min-h-[360px] overflow-hidden bg-black lg:min-h-[680px]">
             {imageUrl && (
               <img
                 key={imageUrl}
                 src={imageUrl}
                 alt=""
                 data-testid="gibs-image"
-                className="h-full w-full object-cover"
+                className="h-full w-full object-cover transition-transform duration-75"
+                style={{
+                  transform: `scale(${imagePreviewScale})`,
+                  transformOrigin: "center",
+                }}
                 onLoad={() => setImageLoading(false)}
                 onError={() => {
                   setError("Imagery unavailable for this selection.");
@@ -129,12 +143,22 @@ export function ImageryModal() {
               </div>
             </div>
 
-            <LayerSwitcher value={layerId} onValueChange={setLayer} />
+            <LayerSwitcher
+              value={layerId}
+              onValueChange={setLayer}
+              action={<ImageryInfoButton onClick={() => setInfoOpen(true)} />}
+            />
             <DatePicker value={date} onChange={setDate} />
-            <ZoomControl value={zoomLevel} onChange={setZoomLevel} />
+            <ZoomControl
+              value={imageryZoomDegrees}
+              previewValue={previewZoomDegrees}
+              onPreviewChange={setPreviewZoomDegrees}
+              onCommit={setImageryZoomDegrees}
+            />
           </aside>
         </div>
       </DialogContent>
+      <ImageryInfoModal open={infoOpen} onOpenChange={setInfoOpen} />
     </Dialog>
   );
 }
