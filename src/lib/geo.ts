@@ -1,12 +1,16 @@
 import { Vector3 } from "three";
 import type { BoundingBox } from "@/types/imagery";
 
-export const IMAGERY_ZOOM_MIN_DEGREES = 0.03;
+export const IMAGERY_ZOOM_MIN_DEGREES = 0.09;
 export const IMAGERY_ZOOM_MAX_DEGREES = 12;
 export const DEFAULT_IMAGERY_ZOOM_DEGREES = 2;
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+export function normalizeLongitude(lon: number) {
+  return ((lon + 540) % 360) - 180;
 }
 
 export function pointToLatLon(point: Vector3, radius = 1) {
@@ -69,6 +73,17 @@ export function formatApproxDistance(sizeDegrees: number) {
   }
 
   return `${kilometers.toFixed(2)} km`;
+}
+
+export function bboxWidthKm(bbox: BoundingBox) {
+  const centerLat = (bbox.minLat + bbox.maxLat) / 2;
+  const lonKm = Math.cos((centerLat * Math.PI) / 180) * 111;
+
+  return Math.max(0, (bbox.maxLon - bbox.minLon) * lonKm);
+}
+
+export function bboxHeightKm(bbox: BoundingBox) {
+  return Math.max(0, (bbox.maxLat - bbox.minLat) * 111);
 }
 
 export function formatCoordinates(lat: number, lon: number) {

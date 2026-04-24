@@ -14,6 +14,7 @@ type AppState = {
   layerId: string;
   imageryZoomDegrees: number;
   selectPoint: (lat: number, lon: number) => void;
+  recenterPoint: (lat: number, lon: number) => void;
   closeModal: () => void;
   setDate: (date: string) => void;
   setLayer: (id: string) => void;
@@ -27,6 +28,7 @@ export const useAppStore = create<AppState>((set) => ({
   layerId: "viirs-snpp",
   imageryZoomDegrees: DEFAULT_IMAGERY_ZOOM_DEGREES,
   selectPoint: (lat, lon) => set({ selectedPoint: { lat, lon }, modalOpen: true }),
+  recenterPoint: (lat, lon) => set({ selectedPoint: { lat, lon } }),
   closeModal: () => set({ modalOpen: false }),
   setDate: (date) => set({ date }),
   setLayer: (layerId) => set({ layerId }),
