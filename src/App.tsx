@@ -1,5 +1,6 @@
 import { Satellite } from "lucide-react";
 import { Globe } from "@/components/Globe/Globe";
+import { MaxZoomImagery } from "@/components/Globe/MaxZoomImagery";
 import { ImageryModal } from "@/components/Modal/ImageryModal";
 import { formatLongDate } from "@/lib/dates";
 import { getImageryProvider } from "@/providers/registry";
@@ -13,6 +14,7 @@ export default function App() {
   return (
     <main className="relative h-dvh w-screen overflow-hidden bg-space">
       <Globe />
+      <MaxZoomImagery />
 
       <header
         data-testid="app-chrome"

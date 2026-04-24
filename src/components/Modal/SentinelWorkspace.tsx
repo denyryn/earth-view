@@ -1,10 +1,10 @@
 import { RotateCcw } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { bboxHeightKm, bboxWidthKm, formatApproxDistance } from "@/lib/geo";
 import type { BoundingBox } from "@/types/imagery";
 
-type SentinelViewport = {
+export type SentinelViewport = {
   scale: number;
   x: number;
   y: number;
@@ -14,6 +14,7 @@ type SentinelWorkspaceProps = {
   imageUrl: string;
   bbox: BoundingBox;
   onViewportChange?: (viewport: SentinelViewport) => void;
+  onPanCommit?: (viewport: SentinelViewport) => void;
 };
 
 const MIN_SCALE = 1;
@@ -23,6 +24,7 @@ export function SentinelWorkspace({
   imageUrl,
   bbox,
   onViewportChange,
+  onPanCommit,
 }: SentinelWorkspaceProps) {
   const [viewport, setViewport] = useState<SentinelViewport>({ scale: 1, x: 0, y: 0 });
   const [dragStart, setDragStart] = useState<{
@@ -44,14 +46,25 @@ export function SentinelWorkspace({
     };
   }, [bbox]);
 
-  function updateViewport(next: SentinelViewport) {
+  useEffect(() => {
+    setViewport({ scale: 1, x: 0, y: 0 });
+    setDragStart(null);
+    onViewportChange?.({ scale: 1, x: 0, y: 0 });
+  }, [bbox, imageUrl, onViewportChange]);
+
+  function clampViewport(next: SentinelViewport) {
     const clampedScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, next.scale));
-    const panLimit = (clampedScale - 1) * 420;
-    const clamped = {
+    const panLimit = Math.max(420, (clampedScale - 1) * 420);
+
+    return {
       scale: clampedScale,
       x: Math.min(panLimit, Math.max(-panLimit, next.x)),
       y: Math.min(panLimit, Math.max(-panLimit, next.y)),
     };
+  }
+
+  function updateViewport(next: SentinelViewport) {
+    const clamped = clampViewport(next);
 
     setViewport(clamped);
     onViewportChange?.(clamped);
@@ -97,7 +110,27 @@ export function SentinelWorkspace({
             y: dragStart.originY + event.clientY - dragStart.y,
           });
         }}
-        onPointerUp={() => setDragStart(null)}
+        onPointerUp={(event) => {
+          if (!dragStart || dragStart.pointerId !== event.pointerId) {
+            setDragStart(null);
+            return;
+          }
+
+          const nextViewport = clampViewport({
+            ...viewport,
+            x: dragStart.originX + event.clientX - dragStart.x,
+            y: dragStart.originY + event.clientY - dragStart.y,
+          });
+
+          setDragStart(null);
+
+          if (
+            nextViewport.scale <= 1.01 &&
+            (Math.abs(nextViewport.x) >= 4 || Math.abs(nextViewport.y) >= 4)
+          ) {
+            onPanCommit?.(nextViewport);
+          }
+        }}
         onPointerCancel={() => setDragStart(null)}
         className="h-full w-full cursor-grab select-none object-cover active:cursor-grabbing"
         style={{

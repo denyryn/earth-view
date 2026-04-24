@@ -1,5 +1,5 @@
 import { ArrowLeft, LoaderCircle, MapPinned, Satellite, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,7 +24,7 @@ import type { BoundingBox } from "@/types/imagery";
 import { DatePicker } from "./DatePicker";
 import { ImageryInfoButton, ImageryInfoModal } from "./ImageryInfoModal";
 import { LayerSwitcher } from "./LayerSwitcher";
-import { SentinelWorkspace } from "./SentinelWorkspace";
+import { SentinelWorkspace, type SentinelViewport } from "./SentinelWorkspace";
 import { ZoomControl } from "./ZoomControl";
 
 type ModalMode = "regional" | "sentinel";
@@ -35,6 +35,9 @@ type SentinelState = {
 } | null;
 
 const SENTINEL_DEFAULT_SIZE_DEGREES = 0.09;
+const SENTINEL_NATIVE_METERS = 10;
+const SENTINEL_RENDER_SIZE = 1024;
+const SENTINEL_MIN_NATIVE_KM = (SENTINEL_NATIVE_METERS * SENTINEL_RENDER_SIZE) / 1000;
 
 export function ImageryModal() {
   const {
@@ -59,6 +62,11 @@ export function ImageryModal() {
   const [sentinelState, setSentinelState] = useState<SentinelState>(null);
   const [sentinelLoading, setSentinelLoading] = useState(false);
   const [sentinelError, setSentinelError] = useState<string | null>(null);
+  const [sentinelViewport, setSentinelViewport] = useState<SentinelViewport>({
+    scale: 1,
+    x: 0,
+    y: 0,
+  });
   const [regionalPan, setRegionalPan] = useState({ x: 0, y: 0 });
   const [regionalDragStart, setRegionalDragStart] = useState<{
     pointerId: number;
@@ -90,6 +98,7 @@ export function ImageryModal() {
     setMode("regional");
     setSentinelState(null);
     setSentinelError(null);
+    setSentinelViewport({ scale: 1, x: 0, y: 0 });
 
     provider
       .fetchImage({ bbox, date, width: 1024, height: 1024 })
@@ -129,16 +138,33 @@ export function ImageryModal() {
   const imagePreviewScale = imageryZoomDegrees / previewZoomDegrees;
   const displayedImageLabel = provider.name;
 
-  async function renderSentinelImage() {
-    if (!bbox || !selectedPoint) {
-      return;
+  function expandBboxToNativeLimit(inputBbox: BoundingBox) {
+    const widthKm = bboxWidthKm(inputBbox);
+    const heightKm = bboxHeightKm(inputBbox);
+    const currentMaxKm = Math.max(widthKm, heightKm);
+
+    if (currentMaxKm >= SENTINEL_MIN_NATIVE_KM || currentMaxKm <= 0) {
+      return inputBbox;
     }
 
-    const sentinelBbox = bboxFromPoint(
-      selectedPoint.lat,
-      selectedPoint.lon,
-      Math.min(imageryZoomDegrees, SENTINEL_DEFAULT_SIZE_DEGREES),
-    );
+    const scale = SENTINEL_MIN_NATIVE_KM / currentMaxKm;
+    const centerLat = (inputBbox.minLat + inputBbox.maxLat) / 2;
+    const centerLon = normalizeLongitude((inputBbox.minLon + inputBbox.maxLon) / 2);
+    const nextLatSpan = (inputBbox.maxLat - inputBbox.minLat) * scale;
+    const nextLonSpan = (inputBbox.maxLon - inputBbox.minLon) * scale;
+
+    return {
+      minLat: clamp(centerLat - nextLatSpan / 2, -85, 85),
+      maxLat: clamp(centerLat + nextLatSpan / 2, -85, 85),
+      minLon: clamp(centerLon - nextLonSpan / 2, -180, 180),
+      maxLon: clamp(centerLon + nextLonSpan / 2, -180, 180),
+    };
+  }
+
+  async function requestSentinelImage(sentinelBbox: BoundingBox) {
+    if (!selectedPoint) {
+      return;
+    }
 
     setSentinelLoading(true);
     setSentinelError(null);
@@ -152,8 +178,8 @@ export function ImageryModal() {
         body: JSON.stringify({
           bbox: sentinelBbox,
           date,
-          width: 1024,
-          height: 1024,
+          width: SENTINEL_RENDER_SIZE,
+          height: SENTINEL_RENDER_SIZE,
         }),
       });
 
@@ -175,6 +201,7 @@ export function ImageryModal() {
         imageUrl: URL.createObjectURL(blob),
         bbox: sentinelBbox,
       });
+      setSentinelViewport({ scale: 1, x: 0, y: 0 });
       setMode("sentinel");
     } catch (requestError) {
       setSentinelError(
@@ -185,6 +212,103 @@ export function ImageryModal() {
     } finally {
       setSentinelLoading(false);
     }
+  }
+
+  async function renderSentinelImage(center = selectedPoint) {
+    if (!bbox || !center) {
+      return;
+    }
+
+    await requestSentinelImage(
+      expandBboxToNativeLimit(
+        bboxFromPoint(
+          center.lat,
+          center.lon,
+          Math.min(imageryZoomDegrees, SENTINEL_DEFAULT_SIZE_DEGREES),
+        ),
+      ),
+    );
+  }
+
+  function pointFromRegionalEvent(event: PointerEvent<HTMLImageElement>) {
+    if (!bbox || !selectedPoint) {
+      return null;
+    }
+
+    const rect = imagePaneRef.current?.getBoundingClientRect();
+
+    if (!rect) {
+      return null;
+    }
+
+    const scale = imagePreviewScale || 1;
+    const baseX = (event.clientX - rect.left - rect.width / 2 - regionalPan.x) / scale;
+    const baseY = (event.clientY - rect.top - rect.height / 2 - regionalPan.y) / scale;
+    const lonSpan = bbox.maxLon - bbox.minLon;
+    const latSpan = bbox.maxLat - bbox.minLat;
+
+    return {
+      lat: clamp(selectedPoint.lat - (baseY / rect.height) * latSpan, -85, 85),
+      lon: normalizeLongitude(selectedPoint.lon + (baseX / rect.width) * lonSpan),
+    };
+  }
+
+  function sentinelBboxForViewport(viewport: SentinelViewport, respectNativeLimit = false) {
+    if (!sentinelState) {
+      return null;
+    }
+
+    const rect = imagePaneRef.current?.getBoundingClientRect();
+
+    if (!rect) {
+      return sentinelState.bbox;
+    }
+
+    const sourceBbox = sentinelState.bbox;
+    const sourceLat = (sourceBbox.minLat + sourceBbox.maxLat) / 2;
+    const sourceLon = normalizeLongitude((sourceBbox.minLon + sourceBbox.maxLon) / 2);
+    const scale = viewport.scale || 1;
+    const lonSpan = sourceBbox.maxLon - sourceBbox.minLon;
+    const latSpan = sourceBbox.maxLat - sourceBbox.minLat;
+    const nextLonSpan = lonSpan / scale;
+    const nextLatSpan = latSpan / scale;
+    const nextLat = clamp(
+      sourceLat + (viewport.y / (rect.height * scale)) * latSpan,
+      -85,
+      85,
+    );
+    const nextLon = normalizeLongitude(
+      sourceLon - (viewport.x / (rect.width * scale)) * lonSpan,
+    );
+
+    const nextBbox = {
+      minLat: clamp(nextLat - nextLatSpan / 2, -85, 85),
+      maxLat: clamp(nextLat + nextLatSpan / 2, -85, 85),
+      minLon: clamp(nextLon - nextLonSpan / 2, -180, 180),
+      maxLon: clamp(nextLon + nextLonSpan / 2, -180, 180),
+    };
+
+    return respectNativeLimit ? expandBboxToNativeLimit(nextBbox) : nextBbox;
+  }
+
+  async function commitSentinelPan(viewport: SentinelViewport) {
+    const nextBbox = sentinelBboxForViewport(viewport, true);
+
+    if (!nextBbox) {
+      return;
+    }
+
+    await requestSentinelImage(nextBbox);
+  }
+
+  async function refineSentinelView() {
+    const nextBbox = sentinelBboxForViewport(sentinelViewport, true);
+
+    if (!nextBbox) {
+      return;
+    }
+
+    await requestSentinelImage(nextBbox);
   }
 
   function exitSentinelMode() {
@@ -218,8 +342,19 @@ export function ImageryModal() {
   const sentinelWidth = sentinelState ? bboxWidthKm(sentinelState.bbox) : 0;
   const sentinelHeight = sentinelState ? bboxHeightKm(sentinelState.bbox) : 0;
   const sentinelNativeMeters = sentinelState
-    ? (Math.max(sentinelWidth, sentinelHeight) * 1000) / 1024
+    ? (Math.max(sentinelWidth, sentinelHeight) * 1000) / SENTINEL_RENDER_SIZE
     : 0;
+  const refinedSentinelBbox = sentinelState
+    ? sentinelBboxForViewport(sentinelViewport, true)
+    : null;
+  const refinedSentinelMeters = refinedSentinelBbox
+    ? (Math.max(bboxWidthKm(refinedSentinelBbox), bboxHeightKm(refinedSentinelBbox)) * 1000) /
+      SENTINEL_RENDER_SIZE
+    : 0;
+  const canRefineSentinel =
+    sentinelViewport.scale > 1.01 &&
+    refinedSentinelBbox !== null &&
+    Math.abs(refinedSentinelMeters - sentinelNativeMeters) > 0.2;
 
   return (
     <Dialog open={modalOpen} onOpenChange={(open) => !open && closeModal()}>
@@ -230,7 +365,12 @@ export function ImageryModal() {
             className="relative min-h-[360px] overflow-hidden bg-black lg:min-h-[680px]"
           >
             {mode === "sentinel" && sentinelState ? (
-              <SentinelWorkspace imageUrl={sentinelState.imageUrl} bbox={sentinelState.bbox} />
+              <SentinelWorkspace
+                imageUrl={sentinelState.imageUrl}
+                bbox={sentinelState.bbox}
+                onViewportChange={setSentinelViewport}
+                onPanCommit={(viewport) => void commitSentinelPan(viewport)}
+              />
             ) : imageUrl ? (
               <img
                 key={imageUrl}
@@ -244,6 +384,16 @@ export function ImageryModal() {
                   transformOrigin: "center",
                 }}
                 onPointerDown={(event) => {
+                  if (event.shiftKey) {
+                    const point = pointFromRegionalEvent(event);
+
+                    if (point) {
+                      void renderSentinelImage(point);
+                    }
+
+                    return;
+                  }
+
                   event.currentTarget.setPointerCapture(event.pointerId);
                   setRegionalDragStart({
                     pointerId: event.pointerId,
@@ -343,10 +493,28 @@ export function ImageryModal() {
                   Back to regional view
                 </Button>
 
+                <Button
+                  type="button"
+                  variant="secondary"
+                  onClick={refineSentinelView}
+                  disabled={sentinelLoading || !canRefineSentinel}
+                  className="w-full"
+                >
+                  {sentinelLoading ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-4 w-4" />
+                  )}
+                  Refine current Sentinel view
+                </Button>
+
                 <div className="rounded-md border border-border bg-background/45 p-4 text-sm text-muted-foreground">
                   <div className="mb-2 font-medium text-foreground">Sentinel workspace</div>
                   <div>Area: {formatApproxDistance(Math.max(sentinelWidth, sentinelHeight) / 111)} wide</div>
-                  <div>Request scale: ~{sentinelNativeMeters.toFixed(1)}m/px</div>
+                  <div>
+                    Request scale: ~{sentinelNativeMeters.toFixed(1)}m/px
+                    {sentinelNativeMeters < SENTINEL_NATIVE_METERS ? " (native limit)" : ""}
+                  </div>
                   <div className="mt-3 leading-relaxed">
                     Drag the image to pan. Use wheel or trackpad scroll to zoom client-side. A
                     later refine action can request a new Sentinel image for the current view.
@@ -359,7 +527,7 @@ export function ImageryModal() {
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={renderSentinelImage}
+                    onClick={() => void renderSentinelImage()}
                     disabled={sentinelLoading || !bbox}
                     className="w-full"
                   >
