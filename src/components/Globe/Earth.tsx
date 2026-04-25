@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { RepeatWrapping, SRGBColorSpace, TextureLoader, Vector3 } from "three";
 import { pointToLatLon } from "@/lib/geo";
 import { BoundaryLines } from "./BoundaryLines";
+import { CityLabels } from "./CityLabels";
 
 type EarthProps = {
   textureUrl: string;
@@ -58,6 +59,7 @@ export function Earth({ textureUrl, onSelect }: EarthProps) {
         />
       </mesh>
       <BoundaryLines />
+      <CityLabels />
     </group>
   );
 }

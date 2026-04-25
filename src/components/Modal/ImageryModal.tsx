@@ -165,14 +165,14 @@ export function ImageryModal() {
     }
   }
 
-  async function loadSentinelTimeLapse() {
+  async function loadSentinelTimeLapse(dayCount: 7 | 30) {
     if (!sentinelState) {
       return;
     }
 
     const variant = getSentinelVariant(sentinelState.variantId);
-    const frameDates = getRecentIsoDates(date, 7);
-    setTimeLapseDays(7);
+    const frameDates = getRecentIsoDates(date, dayCount);
+    setTimeLapseDays(dayCount);
     setTimeLapseOpen(true);
     setTimeLapseFrames([]);
     setTimeLapseError(null);
@@ -215,7 +215,7 @@ export function ImageryModal() {
     setTimeLapseLoading(false);
 
     if (loadedFrames.length === 0) {
-      setTimeLapseError(`No ${variant.name} frames were available for this 7-day view.`);
+      setTimeLapseError(`No ${variant.name} frames were available for this ${dayCount}-day view.`);
     } else if (loadedFrames.length < frameDates.length) {
       setTimeLapseError("Some Sentinel daily frames were unavailable, so the sequence is partial.");
     }
@@ -805,20 +805,36 @@ export function ImageryModal() {
 
                 <DatePicker value={date} onChange={setDate} />
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void loadSentinelTimeLapse()}
-                  disabled={timeLapseLoading || !sentinelState}
-                  className="w-full"
-                >
-                  {timeLapseLoading ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Film className="h-4 w-4" />
-                  )}
-                  Last 7 days
-                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadSentinelTimeLapse(7)}
+                    disabled={timeLapseLoading || !sentinelState}
+                    className="w-full"
+                  >
+                    {timeLapseLoading && timeLapseDays === 7 ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Film className="h-4 w-4" />
+                    )}
+                    7 days
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadSentinelTimeLapse(30)}
+                    disabled={timeLapseLoading || !sentinelState}
+                    className="w-full"
+                  >
+                    {timeLapseLoading && timeLapseDays === 30 ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Film className="h-4 w-4" />
+                    )}
+                    30 days
+                  </Button>
+                </div>
 
                 <Button
                   type="button"
