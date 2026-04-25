@@ -1,4 +1,4 @@
-import { ArrowLeft, LoaderCircle, MapPinned, Satellite, Sparkles } from "lucide-react";
+import { ArrowLeft, Film, LoaderCircle, MapPinned, Satellite, Sparkles } from "lucide-react";
 import { type PointerEvent, type WheelEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,7 +27,7 @@ import {
   zoomPercentToDegrees,
   degreesToZoomPercent,
 } from "@/lib/geo";
-import { formatImageryDateTime, formatLongDate } from "@/lib/dates";
+import { formatImageryDateTime, formatLongDate, getRecentIsoDates } from "@/lib/dates";
 import { getSentinelVariant, sentinelVariants } from "@/lib/sentinelVariants";
 import { getImageryProvider, imageryProviders } from "@/providers/registry";
 import { useAppStore } from "@/store/useAppStore";
@@ -36,6 +36,7 @@ import { DatePicker } from "./DatePicker";
 import { ImageryInfoButton, ImageryInfoModal } from "./ImageryInfoModal";
 import { LayerSwitcher } from "./LayerSwitcher";
 import { SentinelWorkspace, type SentinelViewport } from "./SentinelWorkspace";
+import { TimeLapseModal, type TimeLapseFrame } from "./TimeLapseModal";
 
 type ModalMode = "regional" | "sentinel";
 
@@ -66,6 +67,10 @@ export function ImageryModal() {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [timeLapseOpen, setTimeLapseOpen] = useState(false);
+  const [timeLapseFrames, setTimeLapseFrames] = useState<TimeLapseFrame[]>([]);
+  const [timeLapseLoading, setTimeLapseLoading] = useState(false);
+  const [timeLapseError, setTimeLapseError] = useState<string | null>(null);
   const [previewZoomDegrees, setPreviewZoomDegrees] = useState(imageryZoomDegrees);
   const [loadedImageZoomDegrees, setLoadedImageZoomDegrees] = useState(imageryZoomDegrees);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -106,6 +111,49 @@ export function ImageryModal() {
       image.onerror = reject;
       image.src = url;
     });
+  }
+
+  async function loadTimeLapse() {
+    if (!bbox) {
+      return;
+    }
+
+    const frameDates = getRecentIsoDates(date, 7);
+    setTimeLapseOpen(true);
+    setTimeLapseFrames([]);
+    setTimeLapseError(null);
+    setTimeLapseLoading(true);
+
+    const frames = await Promise.allSettled(
+      frameDates.map(async (frameDate) => {
+        const result = await provider.fetchImage({
+          bbox,
+          date: frameDate,
+          width: 1024,
+          height: 1024,
+        });
+        const imageUrl = typeof result === "string" ? result : URL.createObjectURL(result);
+
+        await preloadImage(imageUrl);
+
+        return {
+          date: frameDate,
+          imageUrl,
+        };
+      }),
+    );
+    const loadedFrames = frames
+      .filter((frame): frame is PromiseFulfilledResult<TimeLapseFrame> => frame.status === "fulfilled")
+      .map((frame) => frame.value);
+
+    setTimeLapseFrames(loadedFrames);
+    setTimeLapseLoading(false);
+
+    if (loadedFrames.length === 0) {
+      setTimeLapseError("No imagery frames were available for this 7-day view.");
+    } else if (loadedFrames.length < frameDates.length) {
+      setTimeLapseError("Some daily frames were unavailable, so the sequence is partial.");
+    }
   }
 
   useEffect(() => {
@@ -676,6 +724,8 @@ export function ImageryModal() {
                   </p>
                 </div>
 
+                <DatePicker value={date} onChange={setDate} />
+
                 <Button
                   type="button"
                   variant="secondary"
@@ -728,6 +778,21 @@ export function ImageryModal() {
                   )}
                 </div>
 
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void loadTimeLapse()}
+                  disabled={timeLapseLoading || !bbox}
+                  className="w-full"
+                >
+                  {timeLapseLoading ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Film className="h-4 w-4" />
+                  )}
+                  Last 7 days
+                </Button>
+
                 <LayerSwitcher
                   value={layerId}
                   onValueChange={setLayer}
@@ -740,6 +805,14 @@ export function ImageryModal() {
         </div>
       </DialogContent>
       <ImageryInfoModal open={infoOpen} onOpenChange={setInfoOpen} />
+      <TimeLapseModal
+        open={timeLapseOpen}
+        onOpenChange={setTimeLapseOpen}
+        frames={timeLapseFrames}
+        loading={timeLapseLoading}
+        error={timeLapseError}
+        title={`${provider.name} time passage`}
+      />
     </Dialog>
   );
 }

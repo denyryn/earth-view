@@ -15,6 +15,18 @@ function addDays(date: Date, days: number) {
   return new Date(date.getTime() + days * DAY_MS);
 }
 
+function parseIsoDate(value: string) {
+  return new Date(`${value}T00:00:00Z`);
+}
+
+export function getRecentIsoDates(endDate: string, count: number) {
+  const end = parseIsoDate(endDate);
+
+  return Array.from({ length: count }, (_, index) =>
+    toIsoDate(addDays(end, index - count + 1)),
+  );
+}
+
 export function getLatestTrueColorImagery(now = new Date()) {
   const todayUtcStart = new Date(
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
