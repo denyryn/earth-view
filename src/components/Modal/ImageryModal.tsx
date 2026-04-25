@@ -48,6 +48,10 @@ type SentinelState = {
 
 const SENTINEL_DEFAULT_SIZE_DEGREES = 0.09;
 const SENTINEL_RENDER_SIZE = 1024;
+const TIME_LAPSE_SPEEDS = {
+  7: 650,
+  30: 180,
+};
 
 export function ImageryModal() {
   const {
@@ -64,6 +68,7 @@ export function ImageryModal() {
   } = useAppStore();
   const imagePaneRef = useRef<HTMLDivElement>(null);
   const wasModalOpenRef = useRef(false);
+  const imageScopeRef = useRef<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +76,7 @@ export function ImageryModal() {
   const [timeLapseFrames, setTimeLapseFrames] = useState<TimeLapseFrame[]>([]);
   const [timeLapseLoading, setTimeLapseLoading] = useState(false);
   const [timeLapseError, setTimeLapseError] = useState<string | null>(null);
+  const [timeLapseDays, setTimeLapseDays] = useState<7 | 30>(7);
   const [previewZoomDegrees, setPreviewZoomDegrees] = useState(imageryZoomDegrees);
   const [loadedImageZoomDegrees, setLoadedImageZoomDegrees] = useState(imageryZoomDegrees);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -96,6 +102,8 @@ export function ImageryModal() {
   } | null>(null);
 
   const provider = getImageryProvider(layerId);
+  const selectedLat = selectedPoint?.lat;
+  const selectedLon = selectedPoint?.lon;
   const bbox = useMemo(() => {
     if (!selectedPoint) {
       return null;
@@ -113,12 +121,13 @@ export function ImageryModal() {
     });
   }
 
-  async function loadTimeLapse() {
+  async function loadTimeLapse(dayCount: 7 | 30) {
     if (!bbox) {
       return;
     }
 
-    const frameDates = getRecentIsoDates(date, 7);
+    const frameDates = getRecentIsoDates(date, dayCount);
+    setTimeLapseDays(dayCount);
     setTimeLapseOpen(true);
     setTimeLapseFrames([]);
     setTimeLapseError(null);
@@ -150,9 +159,65 @@ export function ImageryModal() {
     setTimeLapseLoading(false);
 
     if (loadedFrames.length === 0) {
-      setTimeLapseError("No imagery frames were available for this 7-day view.");
+      setTimeLapseError(`No imagery frames were available for this ${dayCount}-day view.`);
     } else if (loadedFrames.length < frameDates.length) {
       setTimeLapseError("Some daily frames were unavailable, so the sequence is partial.");
+    }
+  }
+
+  async function loadSentinelTimeLapse() {
+    if (!sentinelState) {
+      return;
+    }
+
+    const variant = getSentinelVariant(sentinelState.variantId);
+    const frameDates = getRecentIsoDates(date, 7);
+    setTimeLapseDays(7);
+    setTimeLapseOpen(true);
+    setTimeLapseFrames([]);
+    setTimeLapseError(null);
+    setTimeLapseLoading(true);
+
+    const frames = await Promise.allSettled(
+      frameDates.map(async (frameDate) => {
+        const response = await fetch("/api/sentinel-image", {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            bbox: sentinelState.bbox,
+            date: frameDate,
+            variantId: variant.id,
+            width: SENTINEL_RENDER_SIZE,
+            height: SENTINEL_RENDER_SIZE,
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(`${variant.name} imagery is unavailable for ${frameDate}.`);
+        }
+
+        const imageUrl = URL.createObjectURL(await response.blob());
+        await preloadImage(imageUrl);
+
+        return {
+          date: frameDate,
+          imageUrl,
+        };
+      }),
+    );
+    const loadedFrames = frames
+      .filter((frame): frame is PromiseFulfilledResult<TimeLapseFrame> => frame.status === "fulfilled")
+      .map((frame) => frame.value);
+
+    setTimeLapseFrames(loadedFrames);
+    setTimeLapseLoading(false);
+
+    if (loadedFrames.length === 0) {
+      setTimeLapseError(`No ${variant.name} frames were available for this 7-day view.`);
+    } else if (loadedFrames.length < frameDates.length) {
+      setTimeLapseError("Some Sentinel daily frames were unavailable, so the sequence is partial.");
     }
   }
 
@@ -163,6 +228,20 @@ export function ImageryModal() {
 
     let cancelled = false;
     const requestZoomDegrees = imageryZoomDegrees;
+    const nextImageScope = [
+      selectedLat?.toFixed(5),
+      selectedLon?.toFixed(5),
+      date,
+      provider.id,
+    ].join("|");
+
+    if (imageScopeRef.current !== nextImageScope) {
+      setImageUrl(null);
+      setRegionalPan({ x: 0, y: 0 });
+      setCommittedRegionalPan({ x: 0, y: 0 });
+      imageScopeRef.current = nextImageScope;
+    }
+
     setImageLoading(true);
     setError(null);
     setRegionalDragStart(null);
@@ -202,7 +281,7 @@ export function ImageryModal() {
     return () => {
       cancelled = true;
     };
-  }, [bbox, date, imageryZoomDegrees, modalOpen, provider]);
+  }, [bbox, date, imageryZoomDegrees, modalOpen, provider, selectedLat, selectedLon]);
 
   useEffect(() => {
     if (modalOpen && !wasModalOpenRef.current) {
@@ -728,6 +807,21 @@ export function ImageryModal() {
 
                 <Button
                   type="button"
+                  variant="outline"
+                  onClick={() => void loadSentinelTimeLapse()}
+                  disabled={timeLapseLoading || !sentinelState}
+                  className="w-full"
+                >
+                  {timeLapseLoading ? (
+                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Film className="h-4 w-4" />
+                  )}
+                  Last 7 days
+                </Button>
+
+                <Button
+                  type="button"
                   variant="secondary"
                   onClick={refineSentinelView}
                   disabled={sentinelLoading || !canRefineSentinel}
@@ -778,20 +872,36 @@ export function ImageryModal() {
                   )}
                 </div>
 
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => void loadTimeLapse()}
-                  disabled={timeLapseLoading || !bbox}
-                  className="w-full"
-                >
-                  {timeLapseLoading ? (
-                    <LoaderCircle className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Film className="h-4 w-4" />
-                  )}
-                  Last 7 days
-                </Button>
+                <div className="grid grid-cols-2 gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadTimeLapse(7)}
+                    disabled={timeLapseLoading || !bbox}
+                    className="w-full"
+                  >
+                    {timeLapseLoading && timeLapseDays === 7 ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Film className="h-4 w-4" />
+                    )}
+                    7 days
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void loadTimeLapse(30)}
+                    disabled={timeLapseLoading || !bbox}
+                    className="w-full"
+                  >
+                    {timeLapseLoading && timeLapseDays === 30 ? (
+                      <LoaderCircle className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Film className="h-4 w-4" />
+                    )}
+                    30 days
+                  </Button>
+                </div>
 
                 <LayerSwitcher
                   value={layerId}
@@ -811,7 +921,8 @@ export function ImageryModal() {
         frames={timeLapseFrames}
         loading={timeLapseLoading}
         error={timeLapseError}
-        title={`${provider.name} time passage`}
+        title={`${provider.name} · ${timeLapseDays} days`}
+        frameIntervalMs={TIME_LAPSE_SPEEDS[timeLapseDays]}
       />
     </Dialog>
   );

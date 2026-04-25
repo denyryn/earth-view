@@ -59,6 +59,7 @@ export function MaxZoomImagery() {
   const paneRef = useRef<HTMLDivElement>(null);
   const imageCacheRef = useRef(new Map<string, string>());
   const cacheScopeRef = useRef<string | null>(null);
+  const visibleScopeRef = useRef<string | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,10 +110,18 @@ export function MaxZoomImagery() {
     let cancelled = false;
     const nextCacheScope = cacheScope;
     const cacheKey = `${nextCacheScope}|${provider.id}`;
+    const nextVisibleScope = cacheKey;
 
     if (cacheScopeRef.current !== nextCacheScope) {
       imageCacheRef.current.clear();
       cacheScopeRef.current = nextCacheScope;
+    }
+
+    if (visibleScopeRef.current !== nextVisibleScope) {
+      setImageUrl(null);
+      setPan({ x: 0, y: 0 });
+      setCommittedPan({ x: 0, y: 0 });
+      visibleScopeRef.current = nextVisibleScope;
     }
 
     setLoading(true);

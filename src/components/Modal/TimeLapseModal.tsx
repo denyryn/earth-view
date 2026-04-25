@@ -22,9 +22,8 @@ type TimeLapseModalProps = {
   loading: boolean;
   error: string | null;
   title: string;
+  frameIntervalMs: number;
 };
-
-const FRAME_INTERVAL_MS = 650;
 
 export function TimeLapseModal({
   open,
@@ -33,6 +32,7 @@ export function TimeLapseModal({
   loading,
   error,
   title,
+  frameIntervalMs,
 }: TimeLapseModalProps) {
   const [frameIndex, setFrameIndex] = useState(0);
   const [playing, setPlaying] = useState(true);
@@ -55,10 +55,10 @@ export function TimeLapseModal({
 
     const timer = window.setInterval(() => {
       setFrameIndex((index) => (index + 1) % frameCount);
-    }, FRAME_INTERVAL_MS);
+    }, frameIntervalMs);
 
     return () => window.clearInterval(timer);
-  }, [frameCount, open, playing]);
+  }, [frameCount, frameIntervalMs, open, playing]);
 
   function step(delta: number) {
     if (frameCount === 0) {
