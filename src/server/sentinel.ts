@@ -4,13 +4,22 @@ import { getSentinelVariant } from "../lib/sentinelVariants";
 const TOKEN_URL =
   "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token";
 const PROCESS_URL = "https://sh.dataspace.copernicus.eu/api/v1/process";
+const CATALOG_SEARCH_URL = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search";
 
 type SentinelRequest = {
   bbox: BoundingBox;
   date: string;
+  sceneDateTime?: string;
   variantId?: string;
   width?: number;
   height?: number;
+};
+
+type SentinelScenesRequest = {
+  bbox: BoundingBox;
+  date: string;
+  variantId?: string;
+  limit?: number;
 };
 
 type SentinelEnv = {
@@ -23,6 +32,18 @@ type SentinelEnv = {
 type TokenResponse = {
   access_token: string;
   expires_in?: number;
+};
+
+type CatalogFeature = {
+  id?: string;
+  properties?: {
+    datetime?: string;
+    "eo:cloud_cover"?: number;
+  };
+};
+
+type CatalogResponse = {
+  features?: CatalogFeature[];
 };
 
 let tokenCache: { token: string; expiresAt: number } | null = null;
@@ -95,6 +116,27 @@ function dateWindow(date: string, requestWindowDays: number) {
   };
 }
 
+function catalogDateWindow(date: string, lookbackDays: number) {
+  const end = new Date(`${date}T23:59:59Z`);
+  const start = new Date(end);
+  start.setUTCDate(start.getUTCDate() - lookbackDays);
+
+  return `${start.toISOString()}/${end.toISOString()}`;
+}
+
+function sceneDateWindow(sceneDateTime: string) {
+  const center = new Date(sceneDateTime);
+
+  if (Number.isNaN(center.getTime())) {
+    throw new SentinelError("Invalid Sentinel scene timestamp.", 400);
+  }
+
+  return {
+    from: new Date(center.getTime() - 10 * 60 * 1000).toISOString(),
+    to: new Date(center.getTime() + 10 * 60 * 1000).toISOString(),
+  };
+}
+
 function validateRequest(input: SentinelRequest) {
   if (!input.bbox || !input.date) {
     throw new SentinelError("Missing bbox or date for Sentinel request.", 400);
@@ -103,9 +145,23 @@ function validateRequest(input: SentinelRequest) {
   return {
     bbox: input.bbox,
     date: input.date,
+    sceneDateTime: input.sceneDateTime,
     variantId: input.variantId,
     width: Math.min(1024, Math.max(256, Math.round(input.width ?? 1024))),
     height: Math.min(1024, Math.max(256, Math.round(input.height ?? 1024))),
+  };
+}
+
+function validateScenesRequest(input: SentinelScenesRequest) {
+  if (!input.bbox || !input.date) {
+    throw new SentinelError("Missing bbox or date for Sentinel scene search.", 400);
+  }
+
+  return {
+    bbox: input.bbox,
+    date: input.date,
+    variantId: input.variantId,
+    limit: Math.min(20, Math.max(1, Math.round(input.limit ?? 7))),
   };
 }
 
@@ -149,7 +205,9 @@ export async function fetchSentinelImage(input: SentinelRequest, env: SentinelEn
   const request = validateRequest(input);
   const variant = getSentinelVariant(request.variantId);
   const token = await getAccessToken(env);
-  const timeRange = dateWindow(request.date, variant.requestWindowDays);
+  const timeRange = request.sceneDateTime
+    ? sceneDateWindow(request.sceneDateTime)
+    : dateWindow(request.date, variant.requestWindowDays);
 
   const body = {
     input: {
@@ -205,4 +263,82 @@ export async function fetchSentinelImage(input: SentinelRequest, env: SentinelEn
     contentType: response.headers.get("content-type") ?? "image/png",
     bytes: await response.arrayBuffer(),
   };
+}
+
+export async function fetchSentinelScenes(input: SentinelScenesRequest, env: SentinelEnv) {
+  const request = validateScenesRequest(input);
+  const variant = getSentinelVariant(request.variantId);
+  const token = await getAccessToken(env);
+  const body = {
+    collections: [variant.collection],
+    bbox: [
+      request.bbox.minLon,
+      request.bbox.minLat,
+      request.bbox.maxLon,
+      request.bbox.maxLat,
+    ],
+    datetime: catalogDateWindow(request.date, Math.max(45, variant.requestWindowDays * 3)),
+    limit: 100,
+    fields: {
+      include: ["id", "properties.datetime", "properties.eo:cloud_cover"],
+    },
+  };
+
+  const response = await fetch(CATALOG_SEARCH_URL, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: "application/geo+json",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new SentinelError(
+      detail || "Sentinel scenes are unavailable for this area/date.",
+      response.status,
+    );
+  }
+
+  const catalog = (await response.json()) as CatalogResponse;
+  const sceneMap = new Map<
+    string,
+    { dateTime: string; cloudCover: number | null; itemIds: string[] }
+  >();
+
+  for (const feature of catalog.features ?? []) {
+    const dateTime = feature.properties?.datetime;
+    const cloudCover = feature.properties?.["eo:cloud_cover"] ?? null;
+
+    if (!dateTime) {
+      continue;
+    }
+
+    if (variant.collection === "sentinel-2-l2a" && cloudCover !== null && cloudCover > 60) {
+      continue;
+    }
+
+    const minuteKey = dateTime.slice(0, 16);
+    const existing = sceneMap.get(minuteKey);
+
+    if (existing) {
+      if (feature.id) {
+        existing.itemIds.push(feature.id);
+      }
+
+      continue;
+    }
+
+    sceneMap.set(minuteKey, {
+      dateTime,
+      cloudCover,
+      itemIds: feature.id ? [feature.id] : [],
+    });
+  }
+
+  return Array.from(sceneMap.values())
+    .sort((a, b) => new Date(b.dateTime).getTime() - new Date(a.dateTime).getTime())
+    .slice(0, request.limit);
 }

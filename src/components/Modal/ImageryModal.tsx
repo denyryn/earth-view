@@ -55,6 +55,12 @@ type SentinelState = {
   variantId: string;
 } | null;
 
+type SentinelScene = {
+  dateTime: string;
+  cloudCover: number | null;
+  itemIds: string[];
+};
+
 const SENTINEL_DEFAULT_SIZE_DEGREES = 0.09;
 const SENTINEL_RENDER_SIZE = 1024;
 const TIME_LAPSE_SPEEDS = {
@@ -265,53 +271,104 @@ export function ImageryModal() {
     }
 
     const variant = getSentinelVariant(sentinelState.variantId);
-    const frameDates = getRecentIsoDates(date, dayCount);
     setTimeLapseDays(dayCount);
     setTimeLapseOpen(true);
     setTimeLapseFrames([]);
     setTimeLapseError(null);
     setTimeLapseLoading(true);
 
-    const frames = await Promise.allSettled(
-      frameDates.map(async (frameDate) => {
-        const response = await fetch("/api/sentinel-image", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            bbox: sentinelState.bbox,
-            date: frameDate,
-            variantId: variant.id,
-            width: SENTINEL_RENDER_SIZE,
-            height: SENTINEL_RENDER_SIZE,
-          }),
-        });
+    try {
+      const scenesResponse = await fetch("/api/sentinel-scenes", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          bbox: sentinelState.bbox,
+          date,
+          variantId: variant.id,
+          limit: dayCount,
+        }),
+      });
 
-        if (!response.ok) {
-          throw new Error(`${variant.name} imagery is unavailable for ${frameDate}.`);
+      if (!scenesResponse.ok) {
+        let message = "Sentinel scene search failed.";
+
+        try {
+          const body = (await scenesResponse.json()) as { error?: string };
+          message = body.error ?? message;
+        } catch {
+          message = await scenesResponse.text();
         }
 
-        const imageUrl = URL.createObjectURL(await response.blob());
-        await preloadImage(imageUrl);
+        throw new Error(message);
+      }
 
-        return {
-          date: frameDate,
-          imageUrl,
-        };
-      }),
-    );
-    const loadedFrames = frames
-      .filter((frame): frame is PromiseFulfilledResult<TimeLapseFrame> => frame.status === "fulfilled")
-      .map((frame) => frame.value);
+      const { scenes } = (await scenesResponse.json()) as { scenes?: SentinelScene[] };
+      const distinctScenes = (scenes ?? [])
+        .slice()
+        .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
 
-    setTimeLapseFrames(loadedFrames);
-    setTimeLapseLoading(false);
+      if (distinctScenes.length === 0) {
+        setTimeLapseFrames([]);
+        setTimeLapseLoading(false);
+        setTimeLapseError(`No distinct ${variant.name} scenes were found for this view.`);
+        return;
+      }
 
-    if (loadedFrames.length === 0) {
-      setTimeLapseError(`No ${variant.name} frames were available for this ${dayCount}-day view.`);
-    } else if (loadedFrames.length < frameDates.length) {
-      setTimeLapseError("Some Sentinel daily frames were unavailable, so the sequence is partial.");
+      const sceneFrames = await Promise.allSettled(
+        distinctScenes.map(async (scene) => {
+          const response = await fetch("/api/sentinel-image", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              bbox: sentinelState.bbox,
+              date,
+              sceneDateTime: scene.dateTime,
+              variantId: variant.id,
+              width: SENTINEL_RENDER_SIZE,
+              height: SENTINEL_RENDER_SIZE,
+            }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`${variant.name} imagery is unavailable for ${scene.dateTime}.`);
+          }
+
+          const imageUrl = URL.createObjectURL(await response.blob());
+          await preloadImage(imageUrl);
+
+          return {
+            date: scene.dateTime,
+            imageUrl,
+          };
+        }),
+      );
+      const loadedSceneFrames = sceneFrames
+        .filter(
+          (frame): frame is PromiseFulfilledResult<TimeLapseFrame> =>
+            frame.status === "fulfilled",
+        )
+        .map((frame) => frame.value);
+
+      setTimeLapseFrames(loadedSceneFrames);
+      setTimeLapseLoading(false);
+
+      if (loadedSceneFrames.length === 0) {
+        setTimeLapseError(`No ${variant.name} scene frames were available for this view.`);
+      } else if (loadedSceneFrames.length < distinctScenes.length) {
+        setTimeLapseError("Some Sentinel scene frames were unavailable, so the sequence is partial.");
+      } else if (loadedSceneFrames.length < dayCount) {
+        setTimeLapseError(`Only ${loadedSceneFrames.length} distinct scenes were found.`);
+      }
+    } catch (sceneError) {
+      setTimeLapseFrames([]);
+      setTimeLapseLoading(false);
+      setTimeLapseError(
+        sceneError instanceof Error ? sceneError.message : "Sentinel scene search failed.",
+      );
     }
   }
 
@@ -951,7 +1008,7 @@ export function ImageryModal() {
                     ) : (
                       <Film className="h-4 w-4" />
                     )}
-                    7 days
+                    7 scenes
                   </Button>
                   <Button
                     type="button"
@@ -965,7 +1022,7 @@ export function ImageryModal() {
                     ) : (
                       <Film className="h-4 w-4" />
                     )}
-                    30 days
+                    30 scenes
                   </Button>
                 </div>
 
@@ -1070,7 +1127,12 @@ export function ImageryModal() {
         frames={timeLapseFrames}
         loading={timeLapseLoading}
         error={timeLapseError}
-        title={`${provider.name} · ${timeLapseDays} days`}
+        title={
+          mode === "sentinel"
+            ? `${renderedSentinelVariant.name} · ${timeLapseDays} scenes`
+            : `${provider.name} · ${timeLapseDays} days`
+        }
+        frameCountLabel={mode === "sentinel" ? "scene frames" : undefined}
         frameIntervalMs={TIME_LAPSE_SPEEDS[timeLapseDays]}
       />
     </Dialog>

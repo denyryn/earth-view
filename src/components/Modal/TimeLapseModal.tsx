@@ -22,8 +22,25 @@ type TimeLapseModalProps = {
   loading: boolean;
   error: string | null;
   title: string;
+  frameCountLabel?: string;
   frameIntervalMs: number;
 };
+
+function formatFrameDate(value: string) {
+  if (value.includes("T")) {
+    return new Intl.DateTimeFormat("en", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "UTC",
+      timeZoneName: "short",
+    }).format(new Date(value));
+  }
+
+  return formatLongDate(value);
+}
 
 export function TimeLapseModal({
   open,
@@ -32,6 +49,7 @@ export function TimeLapseModal({
   loading,
   error,
   title,
+  frameCountLabel = "daily frames",
   frameIntervalMs,
 }: TimeLapseModalProps) {
   const [frameIndex, setFrameIndex] = useState(0);
@@ -100,7 +118,7 @@ export function TimeLapseModal({
 
             {currentFrame && (
               <div className="absolute right-3 top-3 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-xs text-white/85 backdrop-blur">
-                {formatLongDate(currentFrame.date)}
+                {formatFrameDate(currentFrame.date)}
               </div>
             )}
           </div>
@@ -109,7 +127,7 @@ export function TimeLapseModal({
             <DialogHeader className="pr-7">
               <DialogTitle>{title}</DialogTitle>
               <DialogDescription>
-                {frameCount > 0 ? `${frameCount} daily frames` : "Preparing daily frames"}
+                {frameCount > 0 ? `${frameCount} ${frameCountLabel}` : `Preparing ${frameCountLabel}`}
               </DialogDescription>
             </DialogHeader>
 
@@ -158,7 +176,7 @@ export function TimeLapseModal({
 
             <div className="rounded-md border border-border bg-background/45 p-3 text-sm text-muted-foreground">
               <div className="font-medium text-foreground">
-                {currentFrame ? formatLongDate(currentFrame.date) : "No frame loaded"}
+                {currentFrame ? formatFrameDate(currentFrame.date) : "No frame loaded"}
               </div>
               <div className="mt-1">
                 {frameCount > 0 ? `Frame ${frameIndex + 1} of ${frameCount}` : "Waiting for imagery"}
@@ -178,7 +196,7 @@ export function TimeLapseModal({
                       : "border-border/40 bg-background/35 text-muted-foreground hover:border-border hover:text-foreground"
                   }`}
                 >
-                  <span>{formatLongDate(frame.date)}</span>
+                  <span>{formatFrameDate(frame.date)}</span>
                   <span>{index + 1}</span>
                 </button>
               ))}
