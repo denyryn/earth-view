@@ -8,9 +8,10 @@ import { CityLabels } from "./CityLabels";
 type EarthProps = {
   textureUrl: string;
   onSelect: (lat: number, lon: number) => void;
+  onReady?: () => void;
 };
 
-export function Earth({ textureUrl, onSelect }: EarthProps) {
+export function Earth({ textureUrl, onSelect, onReady }: EarthProps) {
   const { gl } = useThree();
   const selectedPointRef = useRef(new Vector3());
   const texture = useLoader(TextureLoader, textureUrl, (loader) => {
@@ -23,7 +24,8 @@ export function Earth({ textureUrl, onSelect }: EarthProps) {
     texture.offset.x = 0.5;
     texture.anisotropy = gl.capabilities.getMaxAnisotropy();
     texture.needsUpdate = true;
-  }, [gl, texture]);
+    onReady?.();
+  }, [gl, onReady, texture]);
 
   function selectEventPoint(event: ThreeEvent<MouseEvent>) {
     event.stopPropagation();

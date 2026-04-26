@@ -12,6 +12,8 @@ const ADMIN_1_GEOJSON_URLS = [
   "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_1_states_provinces.geojson",
 ] as const;
 
+const geoJsonRequestCache = new Map<string, Promise<GeoJsonCollection>>();
+
 type Position = [number, number];
 
 type LineStringGeometry = {
@@ -140,12 +142,12 @@ function buildGraticuleGeometry() {
   return buildGeometry(vertices);
 }
 
-async function fetchGeoJson(urls: readonly string[], signal: AbortSignal) {
+async function fetchGeoJsonUncached(urls: readonly string[]) {
   let lastError: unknown = null;
 
   for (const url of urls) {
     try {
-      const response = await fetch(url, { signal });
+      const response = await fetch(url);
 
       if (!response.ok) {
         throw new Error(`Unable to load boundary data from ${url}`);
@@ -153,15 +155,28 @@ async function fetchGeoJson(urls: readonly string[], signal: AbortSignal) {
 
       return (await response.json()) as GeoJsonCollection;
     } catch (error) {
-      if (signal.aborted) {
-        throw error;
-      }
-
       lastError = error;
     }
   }
 
   throw lastError;
+}
+
+function fetchGeoJson(urls: readonly string[]) {
+  const cacheKey = urls.join("|");
+  const cached = geoJsonRequestCache.get(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const request = fetchGeoJsonUncached(urls).catch((error: unknown) => {
+    geoJsonRequestCache.delete(cacheKey);
+    throw error;
+  });
+  geoJsonRequestCache.set(cacheKey, request);
+
+  return request;
 }
 
 export function BoundaryLines() {
@@ -172,7 +187,7 @@ export function BoundaryLines() {
   useEffect(() => {
     const controller = new AbortController();
 
-    fetchGeoJson(WORLD_GEOJSON_URLS, controller.signal)
+    fetchGeoJson(WORLD_GEOJSON_URLS)
       .then((collection) => {
         if (!controller.signal.aborted) {
           setCountryGeometry(buildBorderGeometry(collection, 1.006));
@@ -184,7 +199,7 @@ export function BoundaryLines() {
         }
       });
 
-    fetchGeoJson(ADMIN_1_GEOJSON_URLS, controller.signal)
+    fetchGeoJson(ADMIN_1_GEOJSON_URLS)
       .then((collection) => {
         if (!controller.signal.aborted) {
           setAdmin1Geometry(buildBorderGeometry(collection, 1.008));

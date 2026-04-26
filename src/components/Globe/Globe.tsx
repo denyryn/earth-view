@@ -1,6 +1,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import { Suspense, useRef } from "react";
+import { LoaderCircle } from "lucide-react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Raycaster, Sphere, Vector2, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { buildGlobalGibsTextureUrl } from "@/providers/GibsProvider";
@@ -139,6 +140,16 @@ export function Globe() {
   const selectPoint = useAppStore((state) => state.selectPoint);
   const provider = getImageryProvider(layerId);
   const textureUrl = buildGlobalGibsTextureUrl(provider.layerId, date);
+  const [loadingTextureUrl, setLoadingTextureUrl] = useState(textureUrl);
+  const globeLoading = loadingTextureUrl === textureUrl;
+
+  useEffect(() => {
+    setLoadingTextureUrl(textureUrl);
+  }, [textureUrl]);
+
+  const handleEarthReady = useCallback(() => {
+    setLoadingTextureUrl((current) => (current === textureUrl ? "" : current));
+  }, [textureUrl]);
 
   return (
     <div className="absolute inset-0" data-testid="globe-stage">
@@ -153,10 +164,18 @@ export function Globe() {
         <directionalLight position={[-3, -1.8, -3]} intensity={0.2} color="#ffffff" />
         <Starfield />
         <Suspense fallback={null}>
-          <Earth textureUrl={textureUrl} onSelect={selectPoint} />
+          <Earth textureUrl={textureUrl} onSelect={selectPoint} onReady={handleEarthReady} />
         </Suspense>
         <AdaptiveControls />
       </Canvas>
+      {globeLoading && (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-background/15 backdrop-blur-[1px]">
+          <div className="flex items-center gap-2 rounded-md border border-white/10 bg-background/75 px-3 py-2 text-sm text-foreground shadow-xl backdrop-blur">
+            <LoaderCircle className="h-4 w-4 animate-spin text-primary" />
+            Loading globe
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,14 +1,5 @@
 import { ArrowLeft, Film, LoaderCircle, MapPinned, Satellite, Sparkles } from "lucide-react";
-import {
-  type PointerEvent,
-  type WheelEvent,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,129 +16,29 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  bboxFromPoint,
-  bboxHeightKm,
-  bboxWidthKm,
-  clamp,
-  formatApproxDistance,
-  formatCoordinates,
-  normalizeLongitude,
-  zoomPercentToDegrees,
-  degreesToZoomPercent,
-} from "@/lib/geo";
+import { formatApproxDistance, formatCoordinates } from "@/lib/geo";
 import {
   formatExactCaptureTime,
   formatGibsCaptureTime,
   formatSentinelCaptureTime,
 } from "@/lib/captureTime";
-import { getRecentIsoDates } from "@/lib/dates";
-import { getSentinelVariant, sentinelVariants } from "@/lib/sentinelVariants";
+import { sentinelVariants } from "@/lib/sentinelVariants";
 import { getImageryProvider, imageryProviders } from "@/providers/registry";
 import { useAppStore } from "@/store/useAppStore";
-import type { BoundingBox } from "@/types/imagery";
 import { DatePicker } from "./DatePicker";
 import { ImageryInfoButton, ImageryInfoModal } from "./ImageryInfoModal";
+import {
+  TIME_LAPSE_SPEEDS,
+} from "./hooks/imageryModalHelpers";
+import type { ModalMode } from "./hooks/types";
+import { useModalPaneSize } from "./hooks/useModalPaneSize";
+import { useObjectUrls } from "./hooks/useObjectUrls";
+import { useRegionalImagery } from "./hooks/useRegionalImagery";
+import { useSentinelImagery } from "./hooks/useSentinelImagery";
+import { useTimeLapse } from "./hooks/useTimeLapse";
 import { LayerSwitcher } from "./LayerSwitcher";
-import { SentinelWorkspace, type SentinelViewport } from "./SentinelWorkspace";
-import { TimeLapseModal, type TimeLapseFrame } from "./TimeLapseModal";
-
-type ModalMode = "regional" | "sentinel";
-type TimeLapseMode = 7 | 30 | "5y";
-
-type SentinelState = {
-  imageUrl: string;
-  bbox: BoundingBox;
-  variantId: string;
-  sceneDateTime?: string;
-} | null;
-
-type SentinelScene = {
-  dateTime: string;
-  cloudCover: number | null;
-  itemIds: string[];
-};
-
-const SENTINEL_DEFAULT_SIZE_DEGREES = 0.09;
-const SENTINEL_RENDER_SIZE = 1024;
-const SENTINEL_SCENE_LOOKBACK_DAYS = 730;
-const SENTINEL_FIVE_YEAR_LOOKBACK_DAYS = 366;
-const SENTINEL_YEAR_SCENE_SAMPLE_SIZE = 6;
-const SENTINEL_YEAR_SCENE_SEARCH_LIMIT = 80;
-const SENTINEL_FRAME_CONCURRENCY = 5;
-const TIME_LAPSE_SPEEDS = {
-  7: 650,
-  30: 180,
-  "5y": 260,
-};
-
-type SentinelTimeLapseCacheValue = {
-  frames: TimeLapseFrame[];
-  error: string | null;
-};
-
-function bboxFromSpans(lat: number, lon: number, latSpan: number, lonSpan: number): BoundingBox {
-  return {
-    minLat: clamp(lat - latSpan / 2, -85, 85),
-    maxLat: clamp(lat + latSpan / 2, -85, 85),
-    minLon: clamp(lon - lonSpan / 2, -180, 180),
-    maxLon: clamp(lon + lonSpan / 2, -180, 180),
-  };
-}
-
-function sentinelTimeLapseBboxKey(bbox: BoundingBox) {
-  return [
-    bbox.minLat,
-    bbox.minLon,
-    bbox.maxLat,
-    bbox.maxLon,
-  ]
-    .map((value) => value.toFixed(6))
-    .join(",");
-}
-
-function isoDateFromDate(value: Date) {
-  return value.toISOString().slice(0, 10);
-}
-
-function addUtcYears(value: Date, years: number) {
-  const next = new Date(value);
-  next.setUTCFullYear(next.getUTCFullYear() + years);
-  return next;
-}
-
-function selectEvenlySpacedScenes(scenes: SentinelScene[], count: number) {
-  const sortedScenes = scenes
-    .slice()
-    .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
-
-  if (sortedScenes.length <= count) {
-    return sortedScenes;
-  }
-
-  const selectedScenes: SentinelScene[] = [];
-  const usedIndexes = new Set<number>();
-
-  for (let index = 0; index < count; index += 1) {
-    const targetIndex = Math.round((index * (sortedScenes.length - 1)) / (count - 1));
-    let nearestIndex = targetIndex;
-
-    while (usedIndexes.has(nearestIndex) && nearestIndex < sortedScenes.length - 1) {
-      nearestIndex += 1;
-    }
-
-    while (usedIndexes.has(nearestIndex) && nearestIndex > 0) {
-      nearestIndex -= 1;
-    }
-
-    usedIndexes.add(nearestIndex);
-    selectedScenes.push(sortedScenes[nearestIndex]);
-  }
-
-  return selectedScenes.sort(
-    (a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime(),
-  );
-}
+import { SentinelWorkspace } from "./SentinelWorkspace";
+import { TimeLapseModal } from "./TimeLapseModal";
 
 export function ImageryModal() {
   const {
@@ -162,679 +53,56 @@ export function ImageryModal() {
     setImageryZoomDegrees,
     recenterPoint,
   } = useAppStore();
-  const imagePaneRef = useRef<HTMLDivElement | null>(null);
-  const wasModalOpenRef = useRef(false);
-  const imageScopeRef = useRef<string | null>(null);
-  const sentinelTimeLapseCacheRef = useRef(new Map<string, SentinelTimeLapseCacheValue>());
-  const sentinelTimeLapseScopeRef = useRef<string | null>(null);
-  const [imagePaneNode, setImagePaneNode] = useState<HTMLDivElement | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [imageLoading, setImageLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [timeLapseOpen, setTimeLapseOpen] = useState(false);
-  const [timeLapseFrames, setTimeLapseFrames] = useState<TimeLapseFrame[]>([]);
-  const [timeLapseLoading, setTimeLapseLoading] = useState(false);
-  const [timeLapseLoadingProgress, setTimeLapseLoadingProgress] = useState<{
-    loaded: number;
-    total: number;
-  } | null>(null);
-  const [timeLapseError, setTimeLapseError] = useState<string | null>(null);
-  const [timeLapseMode, setTimeLapseMode] = useState<TimeLapseMode>(7);
-  const [previewZoomDegrees, setPreviewZoomDegrees] = useState(imageryZoomDegrees);
-  const [loadedImageZoomDegrees, setLoadedImageZoomDegrees] = useState(imageryZoomDegrees);
   const [infoOpen, setInfoOpen] = useState(false);
   const [mode, setMode] = useState<ModalMode>("regional");
-  const [sentinelVariantId, setSentinelVariantId] = useState(sentinelVariants[0].id);
-  const [sentinelState, setSentinelState] = useState<SentinelState>(null);
-  const [sentinelLoading, setSentinelLoading] = useState(false);
-  const [sentinelError, setSentinelError] = useState<string | null>(null);
-  const [sentinelViewport, setSentinelViewport] = useState<SentinelViewport>({
-    scale: 1,
-    x: 0,
-    y: 0,
-  });
-  const [regionalPan, setRegionalPan] = useState({ x: 0, y: 0 });
-  const [committedRegionalPan, setCommittedRegionalPan] = useState({ x: 0, y: 0 });
-  const [imagePaneSize, setImagePaneSize] = useState<{ width: number; height: number } | null>(
-    null,
-  );
-  const zoomCommitTimerRef = useRef<number | null>(null);
-  const objectUrlsRef = useRef(new Set<string>());
-  const sentinelDateRefreshScopeRef = useRef<string | null>(null);
-  const [regionalDragStart, setRegionalDragStart] = useState<{
-    pointerId: number;
-    x: number;
-    y: number;
-    originX: number;
-    originY: number;
-  } | null>(null);
-
   const provider = getImageryProvider(layerId);
-  const selectedLat = selectedPoint?.lat;
   const selectedLon = selectedPoint?.lon;
-  const hasImageryView = Boolean(selectedPoint?.imageryView);
-  const setImagePaneRef = useCallback((node: HTMLDivElement | null) => {
-    imagePaneRef.current = node;
-    setImagePaneNode(node);
-  }, []);
-  const createObjectUrl = useCallback((blob: Blob) => {
-    const url = URL.createObjectURL(blob);
-    objectUrlsRef.current.add(url);
-    return url;
-  }, []);
-  const revokeObjectUrl = useCallback((url?: string | null) => {
-    if (!url?.startsWith("blob:")) {
-      return;
-    }
-
-    if (objectUrlsRef.current.delete(url)) {
-      URL.revokeObjectURL(url);
-    }
-  }, []);
-  const clearSentinelTimeLapseCache = useCallback(() => {
-    for (const cached of sentinelTimeLapseCacheRef.current.values()) {
-      for (const frame of cached.frames) {
-        revokeObjectUrl(frame.imageUrl);
-      }
-    }
-
-    sentinelTimeLapseCacheRef.current.clear();
-  }, [revokeObjectUrl]);
-  const bbox = useMemo(() => {
-    if (!selectedPoint) {
-      return null;
-    }
-
-    if (selectedPoint.imageryView) {
-      const paneSize = imagePaneSize ?? {
-        width: selectedPoint.imageryView.pixelWidth,
-        height: selectedPoint.imageryView.pixelHeight,
-      };
-
-      const zoomScale = imageryZoomDegrees / selectedPoint.imageryView.lonSpan;
-
-      return bboxFromSpans(
-        selectedPoint.lat,
-        selectedPoint.lon,
-        selectedPoint.imageryView.latSpan *
-          zoomScale *
-          (paneSize.height / selectedPoint.imageryView.pixelHeight),
-        selectedPoint.imageryView.lonSpan *
-          zoomScale *
-          (paneSize.width / selectedPoint.imageryView.pixelWidth),
-      );
-    }
-
-    return bboxFromPoint(selectedPoint.lat, selectedPoint.lon, imageryZoomDegrees);
-  }, [imagePaneSize, imageryZoomDegrees, selectedPoint]);
-  const fallbackBbox = useMemo(() => {
-    if (!selectedPoint) {
-      return null;
-    }
-
-    return bboxFromPoint(selectedPoint.lat, selectedPoint.lon, imageryZoomDegrees);
-  }, [imageryZoomDegrees, selectedPoint]);
-  const regionalImageWidth = imagePaneSize
-    ? Math.min(1400, Math.max(768, Math.round(imagePaneSize.width)))
-    : 1024;
-  const regionalImageHeight = imagePaneSize
-    ? Math.min(1400, Math.max(768, Math.round(imagePaneSize.height)))
-    : 1024;
-
-  useLayoutEffect(() => {
-    if (!modalOpen) {
-      setImagePaneSize(null);
-      return;
-    }
-
-    if (!imagePaneNode) {
-      return;
-    }
-
-    const currentPane = imagePaneNode;
-
-    function updatePaneSize() {
-      const rect = currentPane.getBoundingClientRect();
-      const nextSize = {
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
-      };
-
-      setImagePaneSize((previous) =>
-        previous?.width === nextSize.width && previous.height === nextSize.height
-          ? previous
-          : nextSize,
-      );
-    }
-
-    updatePaneSize();
-
-    const observer = new ResizeObserver(updatePaneSize);
-    observer.observe(currentPane);
-
-    return () => observer.disconnect();
-  }, [imagePaneNode, modalOpen]);
-
-  function preloadImage(url: string) {
-    return new Promise<void>((resolve, reject) => {
-      const image = new Image();
-      image.onload = () => resolve();
-      image.onerror = reject;
-      image.src = url;
-    });
-  }
-
-  async function loadTimeLapse(dayCount: 7 | 30) {
-    if (!bbox) {
-      return;
-    }
-
-    const frameDates = getRecentIsoDates(date, dayCount);
-    setTimeLapseMode(dayCount);
-    setTimeLapseOpen(true);
-    setTimeLapseFrames([]);
-    setTimeLapseError(null);
-    setTimeLapseLoadingProgress(null);
-    setTimeLapseLoading(true);
-
-    const frames = await Promise.allSettled(
-      frameDates.map(async (frameDate) => {
-        const result = await provider.fetchImage({
-          bbox,
-          date: frameDate,
-          width: 1024,
-          height: 1024,
-        });
-        const imageUrl = typeof result === "string" ? result : createObjectUrl(result);
-
-        await preloadImage(imageUrl);
-
-        return {
-          date: frameDate,
-          imageUrl,
-        };
-      }),
-    );
-    const loadedFrames = frames
-      .filter((frame): frame is PromiseFulfilledResult<TimeLapseFrame> => frame.status === "fulfilled")
-      .map((frame) => frame.value);
-
-    setTimeLapseFrames(loadedFrames);
-    setTimeLapseLoading(false);
-    setTimeLapseLoadingProgress(null);
-
-    if (loadedFrames.length === 0) {
-      setTimeLapseError(`No imagery frames were available for this ${dayCount}-day view.`);
-    } else if (loadedFrames.length < frameDates.length) {
-      setTimeLapseError("Some daily frames were unavailable, so the sequence is partial.");
-    }
-  }
-
-  function getSentinelTimeLapseScope() {
-    if (!sentinelState) {
-      return null;
-    }
-
-    return [
-      date,
-      sentinelState.variantId,
-      sentinelTimeLapseBboxKey(sentinelState.bbox),
-      sentinelViewport.scale.toFixed(3),
-      sentinelViewport.x.toFixed(1),
-      sentinelViewport.y.toFixed(1),
-    ].join("|");
-  }
-
-  async function fetchSentinelScenesForWindow(
-    sentinelBbox: BoundingBox,
-    variantId: string,
-    windowDate: string,
-    limit: number,
-    lookbackDays: number,
-  ) {
-    const scenesResponse = await fetch("/api/sentinel-scenes", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        bbox: sentinelBbox,
-        date: windowDate,
-        variantId,
-        limit,
-        lookbackDays,
-      }),
-    });
-
-    if (!scenesResponse.ok) {
-      let message = "Sentinel scene search failed.";
-
-      try {
-        const body = (await scenesResponse.json()) as { error?: string };
-        message = body.error ?? message;
-      } catch {
-        message = await scenesResponse.text();
-      }
-
-      throw new Error(message);
-    }
-
-    const { scenes } = (await scenesResponse.json()) as { scenes?: SentinelScene[] };
-    return scenes ?? [];
-  }
-
-  async function renderSentinelTimeLapseFrames(
-    scenes: SentinelScene[],
-    requestedCount: number,
-    cacheKey: string | null,
-  ) {
-    if (!sentinelState) {
-      return;
-    }
-
-    const variant = getSentinelVariant(sentinelState.variantId);
-    const activeSentinelState = sentinelState;
-    const distinctScenes = scenes
-      .filter(
-        (scene, index, allScenes) =>
-          allScenes.findIndex((candidate) => candidate.dateTime === scene.dateTime) === index,
-      )
-      .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
-
-    if (distinctScenes.length === 0) {
-      const nextError = `No distinct ${variant.name} scenes were found for this view.`;
-      setTimeLapseFrames([]);
-      setTimeLapseLoading(false);
-      setTimeLapseLoadingProgress(null);
-      setTimeLapseError(nextError);
-
-      if (cacheKey) {
-        sentinelTimeLapseCacheRef.current.set(cacheKey, {
-          frames: [],
-          error: nextError,
-        });
-      }
-
-      return;
-    }
-
-    setTimeLapseLoadingProgress({ loaded: 0, total: distinctScenes.length });
-
-    const loadedSceneFrames: TimeLapseFrame[] = [];
-    let completedSceneRequests = 0;
-    let nextSceneIndex = 0;
-
-    async function renderNextScene() {
-      while (nextSceneIndex < distinctScenes.length) {
-        const scene = distinctScenes[nextSceneIndex];
-        nextSceneIndex += 1;
-
-        try {
-          const response = await fetch("/api/sentinel-image", {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-            },
-            body: JSON.stringify({
-              bbox: activeSentinelState.bbox,
-              date,
-              sceneDateTime: scene.dateTime,
-              variantId: variant.id,
-              width: SENTINEL_RENDER_SIZE,
-              height: SENTINEL_RENDER_SIZE,
-            }),
-          });
-
-          if (!response.ok) {
-            throw new Error(`${variant.name} imagery is unavailable for ${scene.dateTime}.`);
-          }
-
-          const imageUrl = createObjectUrl(await response.blob());
-          await preloadImage(imageUrl);
-
-          const frame = {
-            date: scene.dateTime,
-            imageUrl,
-          };
-
-          loadedSceneFrames.push(frame);
-          loadedSceneFrames.sort(
-            (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime(),
-          );
-          setTimeLapseFrames([...loadedSceneFrames]);
-        } finally {
-          completedSceneRequests += 1;
-          setTimeLapseLoadingProgress({
-            loaded: completedSceneRequests,
-            total: distinctScenes.length,
-          });
-        }
-      }
-    }
-
-    await Promise.all(
-      Array.from(
-        { length: Math.min(SENTINEL_FRAME_CONCURRENCY, distinctScenes.length) },
-        renderNextScene,
-      ),
-    );
-
-    setTimeLapseFrames(loadedSceneFrames);
-    setTimeLapseLoading(false);
-    setTimeLapseLoadingProgress(null);
-
-    let nextError: string | null = null;
-
-    if (loadedSceneFrames.length === 0) {
-      nextError = `No ${variant.name} scene frames were available for this view.`;
-    } else if (loadedSceneFrames.length < distinctScenes.length) {
-      nextError = "Some Sentinel scene frames were unavailable, so the sequence is partial.";
-    } else if (loadedSceneFrames.length < requestedCount) {
-      nextError = `Only ${loadedSceneFrames.length} distinct scenes were found in the latest available imagery.`;
-    }
-
-    setTimeLapseError(nextError);
-
-    if (cacheKey) {
-      sentinelTimeLapseCacheRef.current.set(cacheKey, {
-        frames: loadedSceneFrames,
-        error: nextError,
-      });
-    }
-  }
-
-  async function loadSentinelTimeLapse(dayCount: 7 | 30) {
-    if (!sentinelState) {
-      return;
-    }
-
-    const variant = getSentinelVariant(sentinelState.variantId);
-    const cacheScope = getSentinelTimeLapseScope();
-    const cacheKey = cacheScope ? `${cacheScope}|${dayCount}` : null;
-    const cached = cacheKey ? sentinelTimeLapseCacheRef.current.get(cacheKey) : undefined;
-
-    setTimeLapseMode(dayCount);
-    setTimeLapseOpen(true);
-
-    if (cached) {
-      setTimeLapseFrames(cached.frames);
-      setTimeLapseError(cached.error);
-      setTimeLapseLoading(false);
-      setTimeLapseLoadingProgress(null);
-      return;
-    }
-
-    setTimeLapseFrames([]);
-    setTimeLapseError(null);
-    setTimeLapseLoadingProgress(null);
-    setTimeLapseLoading(true);
-
-    try {
-      const scenes = await fetchSentinelScenesForWindow(
-        sentinelState.bbox,
-        variant.id,
-        date,
-        dayCount,
-        SENTINEL_SCENE_LOOKBACK_DAYS,
-      );
-      await renderSentinelTimeLapseFrames(scenes, dayCount, cacheKey);
-    } catch (sceneError) {
-      setTimeLapseFrames([]);
-      setTimeLapseLoading(false);
-      setTimeLapseLoadingProgress(null);
-      setTimeLapseError(
-        sceneError instanceof Error ? sceneError.message : "Sentinel scene search failed.",
-      );
-    }
-  }
-
-  async function loadSentinelFiveYearTimeLapse() {
-    if (!sentinelState) {
-      return;
-    }
-
-    const variant = getSentinelVariant(sentinelState.variantId);
-    const cacheScope = getSentinelTimeLapseScope();
-    const cacheKey = cacheScope ? `${cacheScope}|5y` : null;
-    const cached = cacheKey ? sentinelTimeLapseCacheRef.current.get(cacheKey) : undefined;
-
-    setTimeLapseMode("5y");
-    setTimeLapseOpen(true);
-
-    if (cached) {
-      setTimeLapseFrames(cached.frames);
-      setTimeLapseError(cached.error);
-      setTimeLapseLoading(false);
-      setTimeLapseLoadingProgress(null);
-      return;
-    }
-
-    setTimeLapseFrames([]);
-    setTimeLapseError(null);
-    setTimeLapseLoadingProgress(null);
-    setTimeLapseLoading(true);
-
-    try {
-      const endDate = new Date(`${date}T23:59:59Z`);
-      const selectedScenes: SentinelScene[] = [];
-
-      for (let index = 4; index >= 0; index -= 1) {
-        const windowEndDate = addUtcYears(endDate, -index);
-        const scenes = await fetchSentinelScenesForWindow(
-          sentinelState.bbox,
-          variant.id,
-          isoDateFromDate(windowEndDate),
-          SENTINEL_YEAR_SCENE_SEARCH_LIMIT,
-          SENTINEL_FIVE_YEAR_LOOKBACK_DAYS,
-        );
-
-        selectedScenes.push(
-          ...selectEvenlySpacedScenes(scenes, SENTINEL_YEAR_SCENE_SAMPLE_SIZE),
-        );
-      }
-
-      await renderSentinelTimeLapseFrames(
-        selectedScenes,
-        SENTINEL_YEAR_SCENE_SAMPLE_SIZE * 5,
-        cacheKey,
-      );
-    } catch (sceneError) {
-      setTimeLapseFrames([]);
-      setTimeLapseLoading(false);
-      setTimeLapseLoadingProgress(null);
-      setTimeLapseError(
-        sceneError instanceof Error ? sceneError.message : "Sentinel scene search failed.",
-      );
-    }
-  }
-
-  const fetchLatestSentinelScene = useCallback(async (sentinelBbox: BoundingBox, variantId: string) => {
-    const variant = getSentinelVariant(variantId);
-    const response = await fetch("/api/sentinel-scenes", {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({
-        bbox: sentinelBbox,
-        date,
-        variantId: variant.id,
-        limit: 1,
-        lookbackDays: variant.requestWindowDays,
-      }),
-    });
-
-    if (!response.ok) {
-      return null;
-    }
-
-    const { scenes } = (await response.json()) as { scenes?: SentinelScene[] };
-    return scenes?.[0] ?? null;
-  }, [date]);
-
-  useEffect(() => {
-    if (!modalOpen || !bbox || mode === "sentinel") {
-      return;
-    }
-
-    let cancelled = false;
-    const requestZoomDegrees = imageryZoomDegrees;
-    const nextImageScope = [
-      selectedLat?.toFixed(5),
-      selectedLon?.toFixed(5),
-      date,
-      provider.id,
-    ].join("|");
-
-    if (imageScopeRef.current !== nextImageScope) {
-      setImageUrl(null);
-      setRegionalPan({ x: 0, y: 0 });
-      setCommittedRegionalPan({ x: 0, y: 0 });
-      imageScopeRef.current = nextImageScope;
-    }
-
-    setImageLoading(true);
-    setError(null);
-    setRegionalDragStart(null);
-
-    setMode("regional");
-    setSentinelState((previous) => {
-      revokeObjectUrl(previous?.imageUrl);
-      return null;
-    });
-    setSentinelError(null);
-    setSentinelViewport({ scale: 1, x: 0, y: 0 });
-
-    async function loadRegionalImage(requestBbox: BoundingBox) {
-      const result = await provider.fetchImage({
-        bbox: requestBbox,
-        date,
-        width: regionalImageWidth,
-        height: regionalImageHeight,
-      });
-      const nextImageUrl = typeof result === "string" ? result : createObjectUrl(result);
-      await preloadImage(nextImageUrl);
-
-      return nextImageUrl;
-    }
-
-    loadRegionalImage(bbox)
-      .then(async (result) => {
-        if (cancelled) {
-          return;
-        }
-
-        setImageUrl(result);
-        setLoadedImageZoomDegrees(requestZoomDegrees);
-        setPreviewZoomDegrees(requestZoomDegrees);
-        setRegionalPan({ x: 0, y: 0 });
-        setCommittedRegionalPan({ x: 0, y: 0 });
-        setImageLoading(false);
-      })
-      .catch(async () => {
-        if (!hasImageryView || !fallbackBbox) {
-          if (!cancelled) {
-            setError("Imagery unavailable for this selection.");
-            setImageLoading(false);
-          }
-
-          return;
-        }
-
-        try {
-          const fallbackImageUrl = await loadRegionalImage(fallbackBbox);
-
-          if (!cancelled) {
-            setImageUrl(fallbackImageUrl);
-            setLoadedImageZoomDegrees(requestZoomDegrees);
-            setPreviewZoomDegrees(requestZoomDegrees);
-            setRegionalPan({ x: 0, y: 0 });
-            setCommittedRegionalPan({ x: 0, y: 0 });
-            setImageLoading(false);
-          }
-        } catch {
-          if (!cancelled) {
-            setError("Imagery unavailable for this selection.");
-            setImageLoading(false);
-          }
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    bbox,
-    createObjectUrl,
-    date,
-    fallbackBbox,
-    hasImageryView,
-    imageryZoomDegrees,
+  const { imagePaneRef, imagePaneSize, setImagePaneRef } = useModalPaneSize(modalOpen);
+  const { createObjectUrl, revokeObjectUrl } = useObjectUrls();
+  const regionalImagery = useRegionalImagery({
+    selectedPoint,
     modalOpen,
     mode,
+    date,
     provider,
-    regionalImageHeight,
-    regionalImageWidth,
+    imageryZoomDegrees,
+    imagePaneRef,
+    imagePaneSize,
+    setImageryZoomDegrees,
+    recenterPoint,
+    createObjectUrl,
     revokeObjectUrl,
-    selectedLat,
-    selectedLon,
-  ]);
+  });
+  const sentinelImagery = useSentinelImagery({
+    selectedPoint,
+    modalOpen,
+    mode,
+    setMode,
+    date,
+    bbox: regionalImagery.bbox,
+    imageryZoomDegrees,
+    imagePaneRef,
+    createObjectUrl,
+    revokeObjectUrl,
+  });
+  const resetSentinel = sentinelImagery.resetSentinel;
+  const timeLapse = useTimeLapse({
+    bbox: regionalImagery.bbox,
+    date,
+    provider,
+    sentinelState: sentinelImagery.sentinelState,
+    sentinelViewport: sentinelImagery.sentinelViewport,
+    createObjectUrl,
+    revokeObjectUrl,
+  });
 
   useEffect(() => {
-    if (modalOpen && !wasModalOpenRef.current) {
-      setPreviewZoomDegrees(imageryZoomDegrees);
-      setLoadedImageZoomDegrees(imageryZoomDegrees);
-    }
-
-    wasModalOpenRef.current = modalOpen;
-  }, [imageryZoomDegrees, modalOpen]);
-
-  useEffect(() => {
-    return () => {
-      if (zoomCommitTimerRef.current !== null) {
-        window.clearTimeout(zoomCommitTimerRef.current);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    const objectUrls = objectUrlsRef.current;
-
-    return () => {
-      for (const url of objectUrls) {
-        URL.revokeObjectURL(url);
-      }
-
-      objectUrls.clear();
-    };
-  }, []);
-
-  useEffect(() => {
-    const nextScope = sentinelState
-      ? [
-          date,
-          sentinelState.variantId,
-          sentinelTimeLapseBboxKey(sentinelState.bbox),
-          sentinelViewport.scale.toFixed(3),
-          sentinelViewport.x.toFixed(1),
-          sentinelViewport.y.toFixed(1),
-        ].join("|")
-      : null;
-
-    if (sentinelTimeLapseScopeRef.current === nextScope) {
+    if (!modalOpen || !regionalImagery.bbox || mode === "sentinel") {
       return;
     }
 
-    sentinelTimeLapseScopeRef.current = nextScope;
-    clearSentinelTimeLapseCache();
-  }, [
-    clearSentinelTimeLapseCache,
-    date,
-    sentinelState,
-    sentinelViewport.scale,
-    sentinelViewport.x,
-    sentinelViewport.y,
-  ]);
+    resetSentinel();
+  }, [modalOpen, mode, regionalImagery.bbox, resetSentinel]);
 
   useEffect(() => {
     if (!modalOpen || mode !== "regional") {
@@ -876,343 +144,17 @@ export function ImageryModal() {
     ? formatCoordinates(selectedPoint.lat, selectedPoint.lon)
     : "";
   const regionalCaptureLabel = formatGibsCaptureTime(date, provider.id, selectedLon);
-  const imagePreviewScale = loadedImageZoomDegrees / previewZoomDegrees;
-  const selectedSentinelVariant = getSentinelVariant(sentinelVariantId);
-  const renderedSentinelVariant = getSentinelVariant(sentinelState?.variantId);
   const sentinelCaptureLabel = formatSentinelCaptureTime(
     date,
-    renderedSentinelVariant.id,
+    sentinelImagery.renderedSentinelVariant.id,
     selectedLon,
   );
   const captureLabel =
-    mode === "sentinel" && sentinelState?.sceneDateTime
-      ? formatExactCaptureTime(sentinelState.sceneDateTime)
+    mode === "sentinel" && sentinelImagery.sentinelState?.sceneDateTime
+      ? formatExactCaptureTime(sentinelImagery.sentinelState.sceneDateTime)
       : mode === "sentinel"
         ? sentinelCaptureLabel
         : regionalCaptureLabel;
-  const defaultSentinelVariant = sentinelVariants[0];
-
-  function expandBboxToNativeLimit(inputBbox: BoundingBox, nativeMeters: number) {
-    const widthKm = bboxWidthKm(inputBbox);
-    const heightKm = bboxHeightKm(inputBbox);
-    const currentMaxKm = Math.max(widthKm, heightKm);
-    const minNativeKm = (nativeMeters * SENTINEL_RENDER_SIZE) / 1000;
-
-    if (currentMaxKm >= minNativeKm || currentMaxKm <= 0) {
-      return inputBbox;
-    }
-
-    const scale = minNativeKm / currentMaxKm;
-    const centerLat = (inputBbox.minLat + inputBbox.maxLat) / 2;
-    const centerLon = normalizeLongitude((inputBbox.minLon + inputBbox.maxLon) / 2);
-    const nextLatSpan = (inputBbox.maxLat - inputBbox.minLat) * scale;
-    const nextLonSpan = (inputBbox.maxLon - inputBbox.minLon) * scale;
-
-    return {
-      minLat: clamp(centerLat - nextLatSpan / 2, -85, 85),
-      maxLat: clamp(centerLat + nextLatSpan / 2, -85, 85),
-      minLon: clamp(centerLon - nextLonSpan / 2, -180, 180),
-      maxLon: clamp(centerLon + nextLonSpan / 2, -180, 180),
-    };
-  }
-
-  const requestSentinelImage = useCallback(async (
-    sentinelBbox: BoundingBox,
-    variantId = sentinelVariantId,
-  ) => {
-    if (!selectedPoint) {
-      return;
-    }
-
-    const variant = getSentinelVariant(variantId);
-    setSentinelVariantId(variant.id);
-    setSentinelLoading(true);
-    setSentinelError(null);
-
-    try {
-      const scene = await fetchLatestSentinelScene(sentinelBbox, variant.id);
-      const response = await fetch("/api/sentinel-image", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          bbox: sentinelBbox,
-          date,
-          sceneDateTime: scene?.dateTime,
-          variantId: variant.id,
-          width: SENTINEL_RENDER_SIZE,
-          height: SENTINEL_RENDER_SIZE,
-        }),
-      });
-
-      if (!response.ok) {
-        let message = `${variant.name} imagery is unavailable for this area/date.`;
-
-        try {
-          const body = (await response.json()) as { error?: string };
-          message = body.error ?? message;
-        } catch {
-          message = await response.text();
-        }
-
-        throw new Error(message);
-      }
-
-      const blob = await response.blob();
-      const imageUrl = createObjectUrl(blob);
-      sentinelDateRefreshScopeRef.current = [
-        date,
-        variant.id,
-        sentinelTimeLapseBboxKey(sentinelBbox),
-      ].join("|");
-      setSentinelState((previous) => {
-        revokeObjectUrl(previous?.imageUrl);
-
-        return {
-          imageUrl,
-          bbox: sentinelBbox,
-          variantId: variant.id,
-          sceneDateTime: scene?.dateTime,
-        };
-      });
-      setSentinelVariantId(variant.id);
-      setSentinelViewport({ scale: 1, x: 0, y: 0 });
-      setMode("sentinel");
-    } catch (requestError) {
-      setSentinelError(
-        requestError instanceof Error
-          ? requestError.message
-          : `${variant.name} image request failed.`,
-      );
-    } finally {
-      setSentinelLoading(false);
-    }
-  }, [
-    createObjectUrl,
-    date,
-    fetchLatestSentinelScene,
-    revokeObjectUrl,
-    selectedPoint,
-    sentinelVariantId,
-  ]);
-
-  useEffect(() => {
-    if (!modalOpen || mode !== "sentinel" || !sentinelState) {
-      sentinelDateRefreshScopeRef.current = null;
-      return;
-    }
-
-    if (sentinelLoading) {
-      return;
-    }
-
-    const nextScope = [
-      date,
-      sentinelState.variantId,
-      sentinelTimeLapseBboxKey(sentinelState.bbox),
-    ].join("|");
-
-    if (sentinelDateRefreshScopeRef.current === nextScope) {
-      return;
-    }
-
-    sentinelDateRefreshScopeRef.current = nextScope;
-    void requestSentinelImage(sentinelState.bbox, sentinelState.variantId);
-  }, [date, modalOpen, mode, requestSentinelImage, sentinelLoading, sentinelState]);
-
-  async function renderSentinelImage(center = selectedPoint) {
-    if (!bbox || !center) {
-      return;
-    }
-
-    await requestSentinelImage(
-      expandBboxToNativeLimit(
-        bboxFromPoint(
-          center.lat,
-          center.lon,
-          Math.min(imageryZoomDegrees, SENTINEL_DEFAULT_SIZE_DEGREES),
-        ),
-        defaultSentinelVariant.resolution,
-      ),
-      defaultSentinelVariant.id,
-    );
-  }
-
-  function pointFromRegionalEvent(event: PointerEvent<HTMLImageElement>) {
-    if (!bbox || !selectedPoint) {
-      return null;
-    }
-
-    const rect = imagePaneRef.current?.getBoundingClientRect();
-
-    if (!rect) {
-      return null;
-    }
-
-    const scale = imagePreviewScale || 1;
-    const baseX = (event.clientX - rect.left - rect.width / 2 - regionalPan.x) / scale;
-    const baseY = (event.clientY - rect.top - rect.height / 2 - regionalPan.y) / scale;
-    const lonSpan = bbox.maxLon - bbox.minLon;
-    const latSpan = bbox.maxLat - bbox.minLat;
-
-    return {
-      lat: clamp(selectedPoint.lat - (baseY / rect.height) * latSpan, -85, 85),
-      lon: normalizeLongitude(selectedPoint.lon + (baseX / rect.width) * lonSpan),
-    };
-  }
-
-  function sentinelBboxForViewport(viewport: SentinelViewport, respectNativeLimit = false) {
-    if (!sentinelState) {
-      return null;
-    }
-
-    const rect = imagePaneRef.current?.getBoundingClientRect();
-
-    if (!rect) {
-      return sentinelState.bbox;
-    }
-
-    const sourceBbox = sentinelState.bbox;
-    const sourceLat = (sourceBbox.minLat + sourceBbox.maxLat) / 2;
-    const sourceLon = normalizeLongitude((sourceBbox.minLon + sourceBbox.maxLon) / 2);
-    const scale = viewport.scale || 1;
-    const lonSpan = sourceBbox.maxLon - sourceBbox.minLon;
-    const latSpan = sourceBbox.maxLat - sourceBbox.minLat;
-    const nextLonSpan = lonSpan / scale;
-    const nextLatSpan = latSpan / scale;
-    const nextLat = clamp(
-      sourceLat + (viewport.y / (rect.height * scale)) * latSpan,
-      -85,
-      85,
-    );
-    const nextLon = normalizeLongitude(
-      sourceLon - (viewport.x / (rect.width * scale)) * lonSpan,
-    );
-
-    const nextBbox = {
-      minLat: clamp(nextLat - nextLatSpan / 2, -85, 85),
-      maxLat: clamp(nextLat + nextLatSpan / 2, -85, 85),
-      minLon: clamp(nextLon - nextLonSpan / 2, -180, 180),
-      maxLon: clamp(nextLon + nextLonSpan / 2, -180, 180),
-    };
-
-    return respectNativeLimit
-      ? expandBboxToNativeLimit(nextBbox, renderedSentinelVariant.resolution)
-      : nextBbox;
-  }
-
-  async function commitSentinelPan(viewport: SentinelViewport) {
-    if (sentinelLoading || !sentinelState) {
-      return;
-    }
-
-    const variantId = sentinelState.variantId;
-    const nextBbox = sentinelBboxForViewport(viewport, true);
-
-    if (!nextBbox) {
-      return;
-    }
-
-    await requestSentinelImage(nextBbox, variantId);
-  }
-
-  async function refineSentinelView() {
-    if (sentinelLoading || !sentinelState) {
-      return;
-    }
-
-    const variantId = sentinelState.variantId;
-    const nextBbox = sentinelBboxForViewport(sentinelViewport, true);
-
-    if (!nextBbox) {
-      return;
-    }
-
-    await requestSentinelImage(nextBbox, variantId);
-  }
-
-  async function changeSentinelVariant(nextVariantId: string) {
-    setSentinelVariantId(nextVariantId);
-
-    if (sentinelLoading || !sentinelState) {
-      return;
-    }
-
-    const nextVariant = getSentinelVariant(nextVariantId);
-    await requestSentinelImage(
-      expandBboxToNativeLimit(sentinelState.bbox, nextVariant.resolution),
-      nextVariant.id,
-    );
-  }
-
-  function exitSentinelMode() {
-    setMode("regional");
-    setSentinelError(null);
-  }
-
-  function commitRegionalPan(nextPan = regionalPan) {
-    if (!bbox || !selectedPoint) {
-      setRegionalPan({ x: 0, y: 0 });
-      return;
-    }
-
-    const rect = imagePaneRef.current?.getBoundingClientRect();
-
-    if (!rect || (Math.abs(nextPan.x) < 4 && Math.abs(nextPan.y) < 4)) {
-      setRegionalPan({ x: 0, y: 0 });
-      return;
-    }
-
-    const scale = imagePreviewScale || 1;
-    const lonSpan = (bbox.maxLon - bbox.minLon) / scale;
-    const latSpan = (bbox.maxLat - bbox.minLat) / scale;
-    const nextLat = clamp(selectedPoint.lat + (nextPan.y / rect.height) * latSpan, -85, 85);
-    const nextLon = normalizeLongitude(selectedPoint.lon - (nextPan.x / rect.width) * lonSpan);
-
-    setCommittedRegionalPan(nextPan);
-    setRegionalPan(nextPan);
-    recenterPoint(nextLat, nextLon);
-  }
-
-  function previewRegionalZoom(nextDegrees: number) {
-    setPreviewZoomDegrees(nextDegrees);
-
-    if (zoomCommitTimerRef.current !== null) {
-      window.clearTimeout(zoomCommitTimerRef.current);
-    }
-
-    zoomCommitTimerRef.current = window.setTimeout(() => {
-      setImageryZoomDegrees(nextDegrees);
-      zoomCommitTimerRef.current = null;
-    }, 260);
-  }
-
-  function zoomRegionalImage(event: WheelEvent<HTMLImageElement>) {
-    event.preventDefault();
-
-    const currentPercent = degreesToZoomPercent(previewZoomDegrees);
-    const nextPercent = clamp(currentPercent + (event.deltaY > 0 ? -1 : 1), 0, 100);
-
-    previewRegionalZoom(zoomPercentToDegrees(nextPercent));
-  }
-
-  const sentinelWidth = sentinelState ? bboxWidthKm(sentinelState.bbox) : 0;
-  const sentinelHeight = sentinelState ? bboxHeightKm(sentinelState.bbox) : 0;
-  const sentinelNativeMeters = sentinelState
-    ? (Math.max(sentinelWidth, sentinelHeight) * 1000) / SENTINEL_RENDER_SIZE
-    : 0;
-  const refinedSentinelBbox = sentinelState
-    ? sentinelBboxForViewport(sentinelViewport, true)
-    : null;
-  const refinedSentinelMeters = refinedSentinelBbox
-    ? (Math.max(bboxWidthKm(refinedSentinelBbox), bboxHeightKm(refinedSentinelBbox)) * 1000) /
-      SENTINEL_RENDER_SIZE
-    : 0;
-  const canRefineSentinel =
-    sentinelViewport.scale > 1.01 &&
-    refinedSentinelBbox !== null &&
-    Math.abs(refinedSentinelMeters - sentinelNativeMeters) > 0.2;
 
   return (
     <Dialog open={modalOpen} onOpenChange={(open) => !open && closeModal()}>
@@ -1222,104 +164,107 @@ export function ImageryModal() {
             ref={setImagePaneRef}
             className="relative min-h-[360px] overflow-hidden bg-black lg:min-h-[680px]"
           >
-            {mode === "sentinel" && sentinelState ? (
+            {mode === "sentinel" && sentinelImagery.sentinelState ? (
               <SentinelWorkspace
-                imageUrl={sentinelState.imageUrl}
-                bbox={sentinelState.bbox}
-                onViewportChange={setSentinelViewport}
-                onPanCommit={(viewport) => void commitSentinelPan(viewport)}
+                imageUrl={sentinelImagery.sentinelState.imageUrl}
+                bbox={sentinelImagery.sentinelState.bbox}
+                onViewportChange={sentinelImagery.setSentinelViewport}
+                onPanCommit={(viewport) => void sentinelImagery.commitSentinelPan(viewport)}
               />
-            ) : imageUrl ? (
+            ) : regionalImagery.imageUrl ? (
               <img
-                key={imageUrl}
-                src={imageUrl}
+                key={regionalImagery.imageUrl}
+                src={regionalImagery.imageUrl}
                 alt=""
                 data-testid="gibs-image"
                 draggable={false}
                 className="h-full w-full cursor-grab select-none object-cover active:cursor-grabbing"
                 style={{
-                  transform: `translate(${regionalPan.x}px, ${regionalPan.y}px) scale(${imagePreviewScale})`,
+                  transform: `translate(${regionalImagery.regionalPan.x}px, ${regionalImagery.regionalPan.y}px) scale(${regionalImagery.imagePreviewScale})`,
                   transformOrigin: "center",
                   transition:
-                    regionalDragStart || imageLoading
+                    regionalImagery.regionalDragStart || regionalImagery.imageLoading
                       ? "none"
                       : "transform 160ms ease-out",
                 }}
-                onWheel={zoomRegionalImage}
+                onWheel={regionalImagery.zoomRegionalImage}
                 onPointerDown={(event) => {
                   if (event.shiftKey) {
-                    const point = pointFromRegionalEvent(event);
+                    const point = regionalImagery.pointFromRegionalEvent(event);
 
                     if (point) {
-                      void renderSentinelImage(point);
+                      void sentinelImagery.renderSentinelImage(point);
                     }
 
                     return;
                   }
 
                   event.currentTarget.setPointerCapture(event.pointerId);
-                  setRegionalDragStart({
+                  regionalImagery.setRegionalDragStart({
                     pointerId: event.pointerId,
                     x: event.clientX,
                     y: event.clientY,
-                    originX: committedRegionalPan.x,
-                    originY: committedRegionalPan.y,
+                    originX: regionalImagery.committedRegionalPan.x,
+                    originY: regionalImagery.committedRegionalPan.y,
                   });
                 }}
                 onPointerMove={(event) => {
-                  if (!regionalDragStart || regionalDragStart.pointerId !== event.pointerId) {
+                  if (
+                    !regionalImagery.regionalDragStart ||
+                    regionalImagery.regionalDragStart.pointerId !== event.pointerId
+                  ) {
                     return;
                   }
 
-                  setRegionalPan({
-                    x: regionalDragStart.originX + event.clientX - regionalDragStart.x,
-                    y: regionalDragStart.originY + event.clientY - regionalDragStart.y,
+                  regionalImagery.setRegionalPan({
+                    x: regionalImagery.regionalDragStart.originX + event.clientX - regionalImagery.regionalDragStart.x,
+                    y: regionalImagery.regionalDragStart.originY + event.clientY - regionalImagery.regionalDragStart.y,
                   });
                 }}
                 onPointerUp={(event) => {
-                  const nextPan = regionalDragStart
+                  const nextPan = regionalImagery.regionalDragStart
                     ? {
-                        x: regionalDragStart.originX + event.clientX - regionalDragStart.x,
-                        y: regionalDragStart.originY + event.clientY - regionalDragStart.y,
+                        x: regionalImagery.regionalDragStart.originX + event.clientX - regionalImagery.regionalDragStart.x,
+                        y: regionalImagery.regionalDragStart.originY + event.clientY - regionalImagery.regionalDragStart.y,
                       }
-                    : regionalPan;
+                    : regionalImagery.regionalPan;
 
-                  setRegionalDragStart(null);
-                  commitRegionalPan(nextPan);
+                  regionalImagery.setRegionalDragStart(null);
+                  regionalImagery.commitRegionalPan(nextPan);
                 }}
                 onPointerCancel={() => {
-                  setRegionalDragStart(null);
-                  setRegionalPan(committedRegionalPan);
+                  regionalImagery.setRegionalDragStart(null);
+                  regionalImagery.setRegionalPan(regionalImagery.committedRegionalPan);
                 }}
-                onLoad={() => setImageLoading(false)}
+                onLoad={() => regionalImagery.setImageLoading(false)}
                 onError={() => {
-                  setError("Imagery unavailable for this selection.");
-                  setImageLoading(false);
+                  regionalImagery.setError("Imagery unavailable for this selection.");
+                  regionalImagery.setImageLoading(false);
                 }}
               />
             ) : null}
-            {!imageUrl && imageLoading && !error && (
+            {!regionalImagery.imageUrl && regionalImagery.imageLoading && !regionalImagery.error && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/70">
                 <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
               </div>
             )}
-            {imageUrl && imageLoading && mode === "regional" && !error && (
+            {regionalImagery.imageUrl && regionalImagery.imageLoading && mode === "regional" && !regionalImagery.error && (
               <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-xs text-white/85 backdrop-blur">
                 <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" />
                 Updating
               </div>
             )}
-            {sentinelLoading && (
+            {sentinelImagery.sentinelLoading && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/55">
                 <div className="flex items-center gap-2 rounded-md border border-white/10 bg-background/80 px-3 py-2 text-sm shadow-xl backdrop-blur">
                   <LoaderCircle className="h-4 w-4 animate-spin text-primary" />
-                  Rendering {selectedSentinelVariant.name}
+                  Rendering {sentinelImagery.selectedSentinelVariant.name}
                 </div>
               </div>
             )}
-            {error && (
+            {regionalImagery.error && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-8 text-center text-sm text-muted-foreground">
-                {error}
+                {regionalImagery.error}
               </div>
             )}
           </div>
@@ -1336,21 +281,21 @@ export function ImageryModal() {
             <div className="rounded-md border border-border bg-background/45 p-4">
               <div className="mb-1 flex items-center gap-2 text-sm font-medium">
                 <Satellite className="h-4 w-4 text-primary" />
-                {mode === "sentinel" ? renderedSentinelVariant.name : provider.name}
+                {mode === "sentinel" ? sentinelImagery.renderedSentinelVariant.name : provider.name}
               </div>
               <div className="text-sm text-muted-foreground">
                 {mode === "sentinel"
-                  ? `Copernicus · ${renderedSentinelVariant.resolution}m ${renderedSentinelVariant.category}`
+                  ? `Copernicus · ${sentinelImagery.renderedSentinelVariant.resolution}m ${sentinelImagery.renderedSentinelVariant.category}`
                   : `${provider.satellite} · ${provider.resolution}m nominal`}
               </div>
             </div>
 
-            {mode === "sentinel" && sentinelState ? (
+            {mode === "sentinel" && sentinelImagery.sentinelState ? (
               <>
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={exitSentinelMode}
+                  onClick={sentinelImagery.exitSentinelMode}
                   className="w-full"
                 >
                   <ArrowLeft className="h-4 w-4" />
@@ -1363,8 +308,8 @@ export function ImageryModal() {
                     Sentinel layer
                   </Label>
                   <Select
-                    value={sentinelVariantId}
-                    onValueChange={(value) => void changeSentinelVariant(value)}
+                    value={sentinelImagery.sentinelVariantId}
+                    onValueChange={(value) => void sentinelImagery.changeSentinelVariant(value)}
                   >
                     <SelectTrigger id="sentinel-variant">
                       <SelectValue />
@@ -1378,7 +323,7 @@ export function ImageryModal() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs leading-relaxed text-muted-foreground">
-                    {selectedSentinelVariant.caveat}
+                    {sentinelImagery.selectedSentinelVariant.caveat}
                   </p>
                 </div>
 
@@ -1388,11 +333,11 @@ export function ImageryModal() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => void loadSentinelTimeLapse(7)}
-                    disabled={timeLapseLoading || !sentinelState}
+                    onClick={() => void timeLapse.loadSentinelTimeLapse(7)}
+                    disabled={timeLapse.timeLapseLoading || !sentinelImagery.sentinelState}
                     className="w-full"
                   >
-                    {timeLapseLoading && timeLapseMode === 7 ? (
+                    {timeLapse.timeLapseLoading && timeLapse.timeLapseMode === 7 ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                     ) : (
                       <Film className="h-4 w-4" />
@@ -1402,11 +347,11 @@ export function ImageryModal() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => void loadSentinelTimeLapse(30)}
-                    disabled={timeLapseLoading || !sentinelState}
+                    onClick={() => void timeLapse.loadSentinelTimeLapse(30)}
+                    disabled={timeLapse.timeLapseLoading || !sentinelImagery.sentinelState}
                     className="w-full"
                   >
-                    {timeLapseLoading && timeLapseMode === 30 ? (
+                    {timeLapse.timeLapseLoading && timeLapse.timeLapseMode === 30 ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                     ) : (
                       <Film className="h-4 w-4" />
@@ -1418,11 +363,11 @@ export function ImageryModal() {
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => void loadSentinelFiveYearTimeLapse()}
-                  disabled={timeLapseLoading || !sentinelState}
+                  onClick={() => void timeLapse.loadSentinelFiveYearTimeLapse()}
+                  disabled={timeLapse.timeLapseLoading || !sentinelImagery.sentinelState}
                   className="w-full"
                 >
-                  {timeLapseLoading && timeLapseMode === "5y" ? (
+                  {timeLapse.timeLapseLoading && timeLapse.timeLapseMode === "5y" ? (
                     <LoaderCircle className="h-4 w-4 animate-spin" />
                   ) : (
                     <Film className="h-4 w-4" />
@@ -1433,11 +378,11 @@ export function ImageryModal() {
                 <Button
                   type="button"
                   variant="secondary"
-                  onClick={refineSentinelView}
-                  disabled={sentinelLoading || !canRefineSentinel}
+                  onClick={sentinelImagery.refineSentinelView}
+                  disabled={sentinelImagery.sentinelLoading || !sentinelImagery.canRefineSentinel}
                   className="w-full"
                 >
-                  {sentinelLoading ? (
+                  {sentinelImagery.sentinelLoading ? (
                     <LoaderCircle className="h-4 w-4 animate-spin" />
                   ) : (
                     <Sparkles className="h-4 w-4" />
@@ -1447,10 +392,10 @@ export function ImageryModal() {
 
                 <div className="rounded-md border border-border bg-background/45 p-4 text-sm text-muted-foreground">
                   <div className="mb-2 font-medium text-foreground">Sentinel workspace</div>
-                  <div>Area: {formatApproxDistance(Math.max(sentinelWidth, sentinelHeight) / 111)} wide</div>
+                  <div>Area: {formatApproxDistance(Math.max(sentinelImagery.sentinelWidth, sentinelImagery.sentinelHeight) / 111)} wide</div>
                   <div>
-                    Request scale: ~{sentinelNativeMeters.toFixed(1)}m/px
-                    {sentinelNativeMeters < renderedSentinelVariant.resolution
+                    Request scale: ~{sentinelImagery.sentinelNativeMeters.toFixed(1)}m/px
+                    {sentinelImagery.sentinelNativeMeters < sentinelImagery.renderedSentinelVariant.resolution
                       ? " (native limit)"
                       : ""}
                   </div>
@@ -1466,19 +411,19 @@ export function ImageryModal() {
                   <Button
                     type="button"
                     variant="secondary"
-                    onClick={() => void renderSentinelImage()}
-                    disabled={sentinelLoading || !bbox}
+                    onClick={() => void sentinelImagery.renderSentinelImage()}
+                    disabled={sentinelImagery.sentinelLoading || !regionalImagery.bbox}
                     className="w-full"
                   >
-                    {sentinelLoading ? (
+                    {sentinelImagery.sentinelLoading ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                     ) : (
                       <Sparkles className="h-4 w-4" />
                     )}
                     Render Sentinel-2 high-res
                   </Button>
-                  {sentinelError && (
-                    <p className="text-xs leading-relaxed text-destructive">{sentinelError}</p>
+                  {sentinelImagery.sentinelError && (
+                    <p className="text-xs leading-relaxed text-destructive">{sentinelImagery.sentinelError}</p>
                   )}
                 </div>
 
@@ -1486,11 +431,11 @@ export function ImageryModal() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => void loadTimeLapse(7)}
-                    disabled={timeLapseLoading || !bbox}
+                    onClick={() => void timeLapse.loadTimeLapse(7)}
+                    disabled={timeLapse.timeLapseLoading || !regionalImagery.bbox}
                     className="w-full"
                   >
-                    {timeLapseLoading && timeLapseMode === 7 ? (
+                    {timeLapse.timeLapseLoading && timeLapse.timeLapseMode === 7 ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                     ) : (
                       <Film className="h-4 w-4" />
@@ -1500,11 +445,11 @@ export function ImageryModal() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => void loadTimeLapse(30)}
-                    disabled={timeLapseLoading || !bbox}
+                    onClick={() => void timeLapse.loadTimeLapse(30)}
+                    disabled={timeLapse.timeLapseLoading || !regionalImagery.bbox}
                     className="w-full"
                   >
-                    {timeLapseLoading && timeLapseMode === 30 ? (
+                    {timeLapse.timeLapseLoading && timeLapse.timeLapseMode === 30 ? (
                       <LoaderCircle className="h-4 w-4 animate-spin" />
                     ) : (
                       <Film className="h-4 w-4" />
@@ -1526,21 +471,21 @@ export function ImageryModal() {
       </DialogContent>
       <ImageryInfoModal open={infoOpen} onOpenChange={setInfoOpen} />
       <TimeLapseModal
-        open={timeLapseOpen}
-        onOpenChange={setTimeLapseOpen}
-        frames={timeLapseFrames}
-        loading={timeLapseLoading}
-        loadingProgress={timeLapseLoadingProgress}
-        error={timeLapseError}
+        open={timeLapse.timeLapseOpen}
+        onOpenChange={timeLapse.setTimeLapseOpen}
+        frames={timeLapse.timeLapseFrames}
+        loading={timeLapse.timeLapseLoading}
+        loadingProgress={timeLapse.timeLapseLoadingProgress}
+        error={timeLapse.timeLapseError}
         title={
           mode === "sentinel"
-            ? `${renderedSentinelVariant.name} · ${
-                timeLapseMode === "5y" ? "Last 5 years" : `${timeLapseMode} scenes`
+            ? `${sentinelImagery.renderedSentinelVariant.name} · ${
+                timeLapse.timeLapseMode === "5y" ? "Last 5 years" : `${timeLapse.timeLapseMode} scenes`
               }`
-            : `${provider.name} · ${timeLapseMode} days`
+            : `${provider.name} · ${timeLapse.timeLapseMode} days`
         }
         frameCountLabel={mode === "sentinel" ? "scene frames" : undefined}
-        frameIntervalMs={TIME_LAPSE_SPEEDS[timeLapseMode]}
+        frameIntervalMs={TIME_LAPSE_SPEEDS[timeLapse.timeLapseMode]}
         allowSequenceDownload={mode === "sentinel"}
       />
     </Dialog>
