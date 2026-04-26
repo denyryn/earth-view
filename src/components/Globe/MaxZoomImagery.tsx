@@ -92,6 +92,10 @@ export function MaxZoomImagery() {
   });
 
   const provider = getImageryProvider(layerId);
+  const loadingMessage = provider.loadingMessage ?? "Loading detailed pass";
+  const updatingMessage = provider.loadingMessage
+    ? `Updating. ${provider.loadingMessage}`
+    : "Updating";
   const isVisible = Boolean(globeView?.atMaxZoom && !isSuppressed);
   const aspect = viewportSize.width / Math.max(viewportSize.height, 1);
   const bbox = useMemo(() => {
@@ -440,7 +444,7 @@ export function MaxZoomImagery() {
         <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-background/20">
           <div className="flex items-center gap-2 rounded-md border border-white/10 bg-background/75 px-3 py-2 text-sm shadow-xl backdrop-blur">
             <LoaderCircle className="h-4 w-4 animate-spin text-primary" />
-            Loading detailed pass
+            {loadingMessage}
           </div>
         </div>
       )}
@@ -448,7 +452,7 @@ export function MaxZoomImagery() {
       {imageUrl && loading && !error && (
         <div className="pointer-events-none absolute bottom-6 left-4 flex items-center gap-2 rounded-md border border-white/10 bg-background/65 px-2 py-1 text-xs text-white/85 shadow-xl backdrop-blur md:left-6">
           <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" />
-          Updating
+          {updatingMessage}
         </div>
       )}
 

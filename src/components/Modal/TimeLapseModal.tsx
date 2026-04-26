@@ -127,7 +127,6 @@ export function TimeLapseModal({
           <div className="relative min-h-[340px] bg-black lg:min-h-[620px]">
             {currentFrame ? (
               <img
-                key={currentFrame.imageUrl}
                 src={currentFrame.imageUrl}
                 alt=""
                 draggable={false}

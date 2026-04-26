@@ -1,4 +1,5 @@
 import { GibsProvider } from "./GibsProvider";
+import { SentinelRadarProvider } from "./SentinelRadarProvider";
 
 export const imageryProviders = [
   new GibsProvider({
@@ -78,6 +79,7 @@ export const imageryProviders = [
     bestFor: "Fire, burn scar, flood, snow, ice, and vegetation contrast on another VIIRS platform.",
     caveat: "False-color interpretation takes a moment; this is analysis imagery, not natural color.",
   }),
+  new SentinelRadarProvider(),
 ];
 
 export function getImageryProvider(id: string) {

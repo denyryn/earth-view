@@ -80,6 +80,18 @@ export function useTimeLapse({
     ].join("|");
   }
 
+  const getRegionalSentinelRadarScope = useCallback(() => {
+    if (!bbox || provider.id !== "sentinel-1-radar") {
+      return null;
+    }
+
+    return [
+      date,
+      provider.id,
+      sentinelTimeLapseBboxKey(bbox),
+    ].join("|");
+  }, [bbox, date, provider.id]);
+
   useEffect(() => {
     const nextScope = sentinelState
       ? [
@@ -90,7 +102,7 @@ export function useTimeLapse({
           sentinelViewport.x.toFixed(1),
           sentinelViewport.y.toFixed(1),
         ].join("|")
-      : null;
+      : getRegionalSentinelRadarScope();
 
     if (sentinelTimeLapseScopeRef.current === nextScope) {
       return;
@@ -101,6 +113,7 @@ export function useTimeLapse({
   }, [
     clearSentinelTimeLapseCache,
     date,
+    getRegionalSentinelRadarScope,
     sentinelState,
     sentinelViewport.scale,
     sentinelViewport.x,
@@ -195,13 +208,16 @@ export function useTimeLapse({
     scenes: SentinelScene[],
     requestedCount: number,
     cacheKey: string | null,
+    renderTarget = sentinelState
+      ? { bbox: sentinelState.bbox, variantId: sentinelState.variantId }
+      : null,
   ) {
-    if (!sentinelState) {
+    if (!renderTarget) {
       return;
     }
 
-    const variant = getSentinelVariant(sentinelState.variantId);
-    const activeSentinelState = sentinelState;
+    const variant = getSentinelVariant(renderTarget.variantId);
+    const activeBbox = renderTarget.bbox;
     const distinctScenes = scenes
       .filter(
         (scene, index, allScenes) =>
@@ -245,7 +261,7 @@ export function useTimeLapse({
               "content-type": "application/json",
             },
             body: JSON.stringify({
-              bbox: activeSentinelState.bbox,
+              bbox: activeBbox,
               date,
               sceneDateTime: scene.dateTime,
               variantId: variant.id,
@@ -357,6 +373,54 @@ export function useTimeLapse({
     }
   }
 
+  async function loadRegionalSentinelRadarTimeLapse(dayCount: 7 | 30) {
+    if (!bbox) {
+      return;
+    }
+
+    const variant = getSentinelVariant("s1-radar");
+    const cacheScope = getRegionalSentinelRadarScope();
+    const cacheKey = cacheScope ? `${cacheScope}|${dayCount}` : null;
+    const cached = cacheKey ? sentinelTimeLapseCacheRef.current.get(cacheKey) : undefined;
+
+    setTimeLapseMode(dayCount);
+    setTimeLapseOpen(true);
+
+    if (cached) {
+      setTimeLapseFrames(cached.frames);
+      setTimeLapseError(cached.error);
+      setTimeLapseLoading(false);
+      setTimeLapseLoadingProgress(null);
+      return;
+    }
+
+    setTimeLapseFrames([]);
+    setTimeLapseError(null);
+    setTimeLapseLoadingProgress(null);
+    setTimeLapseLoading(true);
+
+    try {
+      const scenes = await fetchSentinelScenesForWindow(
+        bbox,
+        variant.id,
+        date,
+        SENTINEL_SCENE_SEARCH_LIMIT,
+        SENTINEL_SCENE_LOOKBACK_DAYS,
+      );
+      await renderSentinelTimeLapseFrames(scenes, dayCount, cacheKey, {
+        bbox,
+        variantId: variant.id,
+      });
+    } catch (sceneError) {
+      setTimeLapseFrames([]);
+      setTimeLapseLoading(false);
+      setTimeLapseLoadingProgress(null);
+      setTimeLapseError(
+        sceneError instanceof Error ? sceneError.message : "Sentinel-1 radar scene search failed.",
+      );
+    }
+  }
+
   async function loadSentinelFiveYearTimeLapse() {
     if (!sentinelState) {
       return;
@@ -427,6 +491,7 @@ export function useTimeLapse({
     setTimeLapseOpen,
     loadTimeLapse,
     loadSentinelTimeLapse,
+    loadRegionalSentinelRadarTimeLapse,
     loadSentinelFiveYearTimeLapse,
   };
 }

@@ -2,6 +2,7 @@ import {
   type PointerEvent,
   type RefObject,
   type WheelEvent,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -20,6 +21,10 @@ import {
   preloadImage,
 } from "./imageryModalHelpers";
 import type { ManagedObjectUrl, ModalMode } from "./types";
+
+function imageryErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Imagery unavailable for this selection.";
+}
 
 type SelectedPoint = {
   lat: number;
@@ -61,6 +66,8 @@ export function useRegionalImagery({
   const imageScopeRef = useRef<string | null>(null);
   const wasModalOpenRef = useRef(false);
   const zoomCommitTimerRef = useRef<number | null>(null);
+  const imageUrlRef = useRef<string | null>(null);
+  const updateReasonRef = useRef<"positioning" | "resolution" | null>(null);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageLoading, setImageLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -68,6 +75,7 @@ export function useRegionalImagery({
   const [loadedImageZoomDegrees, setLoadedImageZoomDegrees] = useState(imageryZoomDegrees);
   const [regionalPan, setRegionalPan] = useState({ x: 0, y: 0 });
   const [committedRegionalPan, setCommittedRegionalPan] = useState({ x: 0, y: 0 });
+  const [updateReason, setUpdateReason] = useState<"positioning" | "resolution" | null>(null);
   const [regionalDragStart, setRegionalDragStart] = useState<{
     pointerId: number;
     x: number;
@@ -121,6 +129,16 @@ export function useRegionalImagery({
     : 1024;
   const imagePreviewScale = loadedImageZoomDegrees / previewZoomDegrees;
 
+  const setManagedImageUrl = useCallback((url: string | null) => {
+    imageUrlRef.current = url;
+    setImageUrl(url);
+  }, []);
+
+  const setManagedUpdateReason = useCallback((reason: "positioning" | "resolution" | null) => {
+    updateReasonRef.current = reason;
+    setUpdateReason(reason);
+  }, []);
+
   useEffect(() => {
     if (!modalOpen || !bbox || mode === "sentinel") {
       return;
@@ -134,11 +152,18 @@ export function useRegionalImagery({
       date,
       provider.id,
     ].join("|");
+    const shouldPreserveImageWhileLoading =
+      provider.id === "sentinel-1-radar" &&
+      updateReasonRef.current !== null &&
+      imageUrlRef.current !== null;
 
     if (imageScopeRef.current !== nextImageScope) {
-      setImageUrl(null);
-      setRegionalPan({ x: 0, y: 0 });
-      setCommittedRegionalPan({ x: 0, y: 0 });
+      if (!shouldPreserveImageWhileLoading) {
+        setManagedImageUrl(null);
+        setRegionalPan({ x: 0, y: 0 });
+        setCommittedRegionalPan({ x: 0, y: 0 });
+      }
+
       imageScopeRef.current = nextImageScope;
     }
 
@@ -165,18 +190,20 @@ export function useRegionalImagery({
           return;
         }
 
-        setImageUrl(result);
+        setManagedImageUrl(result);
         setLoadedImageZoomDegrees(requestZoomDegrees);
         setPreviewZoomDegrees(requestZoomDegrees);
         setRegionalPan({ x: 0, y: 0 });
         setCommittedRegionalPan({ x: 0, y: 0 });
         setImageLoading(false);
+        setManagedUpdateReason(null);
       })
-      .catch(async () => {
+      .catch(async (error: unknown) => {
         if (!hasImageryView || !fallbackBbox) {
           if (!cancelled) {
-            setError("Imagery unavailable for this selection.");
+            setError(imageryErrorMessage(error));
             setImageLoading(false);
+            setManagedUpdateReason(null);
           }
 
           return;
@@ -186,17 +213,19 @@ export function useRegionalImagery({
           const fallbackImageUrl = await loadRegionalImage(fallbackBbox);
 
           if (!cancelled) {
-            setImageUrl(fallbackImageUrl);
+            setManagedImageUrl(fallbackImageUrl);
             setLoadedImageZoomDegrees(requestZoomDegrees);
             setPreviewZoomDegrees(requestZoomDegrees);
             setRegionalPan({ x: 0, y: 0 });
             setCommittedRegionalPan({ x: 0, y: 0 });
             setImageLoading(false);
+            setManagedUpdateReason(null);
           }
         } catch {
           if (!cancelled) {
-            setError("Imagery unavailable for this selection.");
+            setError(imageryErrorMessage(error));
             setImageLoading(false);
+            setManagedUpdateReason(null);
           }
         }
       });
@@ -218,6 +247,8 @@ export function useRegionalImagery({
     regionalImageWidth,
     selectedLat,
     selectedLon,
+    setManagedImageUrl,
+    setManagedUpdateReason,
   ]);
 
   useEffect(() => {
@@ -281,11 +312,13 @@ export function useRegionalImagery({
 
     setCommittedRegionalPan(nextPan);
     setRegionalPan(nextPan);
+    setManagedUpdateReason("positioning");
     recenterPoint(nextLat, nextLon);
   }
 
   function previewRegionalZoom(nextDegrees: number) {
     setPreviewZoomDegrees(nextDegrees);
+    setManagedUpdateReason("resolution");
 
     if (zoomCommitTimerRef.current !== null) {
       window.clearTimeout(zoomCommitTimerRef.current);
@@ -315,6 +348,7 @@ export function useRegionalImagery({
     regionalPan,
     committedRegionalPan,
     regionalDragStart,
+    updateReason,
     setError,
     setImageLoading,
     setRegionalDragStart,

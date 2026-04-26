@@ -63,6 +63,7 @@ export class GibsProvider implements ImageryProvider {
   bestFor: string;
   caveat: string;
   requiresAuth = false;
+  loadingMessage?: string;
 
   constructor(config: GibsLayerConfig) {
     this.id = config.id;

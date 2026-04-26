@@ -3,7 +3,7 @@ import { Globe } from "@/components/Globe/Globe";
 import { CameraHotkeys } from "@/components/Globe/CameraHotkeys";
 import { MaxZoomImagery } from "@/components/Globe/MaxZoomImagery";
 import { ImageryModal } from "@/components/Modal/ImageryModal";
-import { formatGibsCaptureTime } from "@/lib/captureTime";
+import { formatGibsCaptureTime, formatSentinelCaptureTime } from "@/lib/captureTime";
 import { getImageryProvider } from "@/providers/registry";
 import { useAppStore } from "@/store/useAppStore";
 
@@ -12,6 +12,9 @@ export default function App() {
   const layerId = useAppStore((state) => state.layerId);
   const globeView = useAppStore((state) => state.globeView);
   const provider = getImageryProvider(layerId);
+  const captureLabel = provider.id === "sentinel-1-radar"
+    ? formatSentinelCaptureTime(date, "s1-radar", globeView?.lon)
+    : formatGibsCaptureTime(date, provider.id, globeView?.lon);
 
   return (
     <main className="relative h-dvh w-screen overflow-hidden bg-space">
@@ -29,7 +32,7 @@ export default function App() {
         <div className="min-w-0">
           <h1 className="truncate text-base font-semibold tracking-normal">Earth View</h1>
           <p className="truncate text-sm text-muted-foreground">
-            {provider.name} · {formatGibsCaptureTime(date, provider.id, globeView?.lon)}
+            {provider.name} · {captureLabel}
           </p>
         </div>
       </header>

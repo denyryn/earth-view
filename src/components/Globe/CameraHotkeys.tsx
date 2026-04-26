@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { imageryProviders } from "@/providers/registry";
 import { useAppStore } from "@/store/useAppStore";
 
@@ -18,7 +18,12 @@ function isTypingTarget(target: EventTarget | null) {
 export function CameraHotkeys() {
   const layerId = useAppStore((state) => state.layerId);
   const modalOpen = useAppStore((state) => state.modalOpen);
+  const atMaxZoom = useAppStore((state) => state.globeView?.atMaxZoom ?? false);
   const setLayer = useAppStore((state) => state.setLayer);
+  const visibleProviders = useMemo(
+    () => imageryProviders.filter((provider) => provider.layerId || atMaxZoom),
+    [atMaxZoom],
+  );
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -28,17 +33,17 @@ export function CameraHotkeys() {
 
       const index = Number(event.key) - 1;
 
-      if (!Number.isInteger(index) || index < 0 || index >= imageryProviders.length) {
+      if (!Number.isInteger(index) || index < 0 || index >= visibleProviders.length) {
         return;
       }
 
       event.preventDefault();
-      setLayer(imageryProviders[index].id);
+      setLayer(visibleProviders[index].id);
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [modalOpen, setLayer]);
+  }, [modalOpen, setLayer, visibleProviders]);
 
   if (modalOpen) {
     return null;
@@ -48,10 +53,10 @@ export function CameraHotkeys() {
     <aside className="pointer-events-auto absolute right-4 top-1/2 z-10 w-[min(220px,calc(100vw-2rem))] -translate-y-1/2 rounded-lg border border-white/10 bg-background/60 p-2.5 shadow-2xl backdrop-blur md:right-6">
       <div className="mb-1.5 flex items-baseline justify-between gap-3">
         <h2 className="text-xs font-semibold tracking-normal text-foreground">Imagery</h2>
-        <span className="text-[11px] text-muted-foreground">1-7</span>
+        <span className="text-[11px] text-muted-foreground">1-{visibleProviders.length}</span>
       </div>
       <div className="space-y-0.5">
-        {imageryProviders.map((provider, index) => {
+        {visibleProviders.map((provider, index) => {
           const selected = provider.id === layerId;
 
           return (

@@ -57,6 +57,11 @@ export function ImageryModal() {
   const [mode, setMode] = useState<ModalMode>("regional");
   const provider = getImageryProvider(layerId);
   const selectedLon = selectedPoint?.lon;
+  const isRegionalRadar = provider.id === "sentinel-1-radar";
+  const regionalLoadingMessage = provider.loadingMessage ?? "Loading imagery";
+  const regionalUpdatingMessage = provider.loadingMessage
+    ? `Updating. ${provider.loadingMessage}`
+    : "Updating";
   const { imagePaneRef, imagePaneSize, setImagePaneRef } = useModalPaneSize(modalOpen);
   const { createObjectUrl, revokeObjectUrl } = useObjectUrls();
   const regionalImagery = useRegionalImagery({
@@ -144,6 +149,9 @@ export function ImageryModal() {
     ? formatCoordinates(selectedPoint.lat, selectedPoint.lon)
     : "";
   const regionalCaptureLabel = formatGibsCaptureTime(date, provider.id, selectedLon);
+  const regionalProviderCaptureLabel = provider.id === "sentinel-1-radar"
+    ? formatSentinelCaptureTime(date, "s1-radar", selectedLon)
+    : regionalCaptureLabel;
   const sentinelCaptureLabel = formatSentinelCaptureTime(
     date,
     sentinelImagery.renderedSentinelVariant.id,
@@ -154,10 +162,19 @@ export function ImageryModal() {
       ? formatExactCaptureTime(sentinelImagery.sentinelState.sceneDateTime)
       : mode === "sentinel"
         ? sentinelCaptureLabel
-        : regionalCaptureLabel;
+        : regionalProviderCaptureLabel;
+
+  function handleOpenChange(open: boolean) {
+    if (open) {
+      return;
+    }
+
+    resetSentinel();
+    closeModal();
+  }
 
   return (
-    <Dialog open={modalOpen} onOpenChange={(open) => !open && closeModal()}>
+    <Dialog open={modalOpen} onOpenChange={handleOpenChange}>
       <DialogContent data-testid="imagery-modal">
         <div className="grid max-h-[92dvh] grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]">
           <div
@@ -245,13 +262,20 @@ export function ImageryModal() {
             ) : null}
             {!regionalImagery.imageUrl && regionalImagery.imageLoading && !regionalImagery.error && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-                <LoaderCircle className="h-8 w-8 animate-spin text-primary" />
+                <div className="flex items-center gap-2 rounded-md border border-white/10 bg-background/80 px-3 py-2 text-sm shadow-xl backdrop-blur">
+                  <LoaderCircle className="h-4 w-4 animate-spin text-primary" />
+                  {regionalLoadingMessage}
+                </div>
               </div>
             )}
             {regionalImagery.imageUrl && regionalImagery.imageLoading && mode === "regional" && !regionalImagery.error && (
-              <div className="pointer-events-none absolute bottom-3 left-3 flex items-center gap-2 rounded-md border border-white/10 bg-black/55 px-2 py-1 text-xs text-white/85 backdrop-blur">
+              <div className="pointer-events-none absolute left-3 top-3 flex items-center gap-2 rounded-md border border-white/10 bg-black/65 px-2.5 py-1.5 text-xs text-white/85 shadow-xl backdrop-blur">
                 <LoaderCircle className="h-3.5 w-3.5 animate-spin text-primary" />
-                Updating
+                {isRegionalRadar
+                  ? regionalImagery.updateReason === "positioning"
+                    ? "Updating positioning"
+                    : "Updating resolution"
+                  : regionalUpdatingMessage}
               </div>
             )}
             {sentinelImagery.sentinelLoading && (
@@ -286,7 +310,9 @@ export function ImageryModal() {
               <div className="text-sm text-muted-foreground">
                 {mode === "sentinel"
                   ? `Copernicus · ${sentinelImagery.renderedSentinelVariant.resolution}m ${sentinelImagery.renderedSentinelVariant.category}`
-                  : `${provider.satellite} · ${provider.resolution}m nominal`}
+                  : `${provider.satellite} · ${provider.resolution}m nominal${
+                      provider.requiresAuth ? " · Copernicus" : ""
+                    }`}
               </div>
             </div>
 
@@ -431,7 +457,11 @@ export function ImageryModal() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => void timeLapse.loadTimeLapse(7)}
+                    onClick={() => void (
+                      isRegionalRadar
+                        ? timeLapse.loadRegionalSentinelRadarTimeLapse(7)
+                        : timeLapse.loadTimeLapse(7)
+                    )}
                     disabled={timeLapse.timeLapseLoading || !regionalImagery.bbox}
                     className="w-full"
                   >
@@ -440,12 +470,16 @@ export function ImageryModal() {
                     ) : (
                       <Film className="h-4 w-4" />
                     )}
-                    7 days
+                    {isRegionalRadar ? "7 scenes" : "7 days"}
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => void timeLapse.loadTimeLapse(30)}
+                    onClick={() => void (
+                      isRegionalRadar
+                        ? timeLapse.loadRegionalSentinelRadarTimeLapse(30)
+                        : timeLapse.loadTimeLapse(30)
+                    )}
                     disabled={timeLapse.timeLapseLoading || !regionalImagery.bbox}
                     className="w-full"
                   >
@@ -454,7 +488,7 @@ export function ImageryModal() {
                     ) : (
                       <Film className="h-4 w-4" />
                     )}
-                    30 days
+                    {isRegionalRadar ? "30 scenes" : "30 days"}
                   </Button>
                 </div>
 
@@ -482,11 +516,13 @@ export function ImageryModal() {
             ? `${sentinelImagery.renderedSentinelVariant.name} · ${
                 timeLapse.timeLapseMode === "5y" ? "Last 5 years" : `${timeLapse.timeLapseMode} scenes`
               }`
+            : isRegionalRadar
+              ? `${provider.name} · ${timeLapse.timeLapseMode} scenes`
             : `${provider.name} · ${timeLapse.timeLapseMode} days`
         }
-        frameCountLabel={mode === "sentinel" ? "scene frames" : undefined}
+        frameCountLabel={mode === "sentinel" || isRegionalRadar ? "scene frames" : undefined}
         frameIntervalMs={TIME_LAPSE_SPEEDS[timeLapse.timeLapseMode]}
-        allowSequenceDownload={mode === "sentinel"}
+        allowSequenceDownload={mode === "sentinel" || isRegionalRadar}
       />
     </Dialog>
   );

@@ -14,7 +14,7 @@ export type ImageryRequest = {
 
 export interface ImageryProvider {
   id: string;
-  layerId: string;
+  layerId?: string;
   name: string;
   satellite: string;
   category: string;
@@ -23,5 +23,6 @@ export interface ImageryProvider {
   summary: string;
   bestFor: string;
   caveat: string;
+  loadingMessage?: string;
   fetchImage(params: ImageryRequest): Promise<string | Blob>;
 }

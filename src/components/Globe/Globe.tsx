@@ -139,7 +139,8 @@ export function Globe() {
   const layerId = useAppStore((state) => state.layerId);
   const selectPoint = useAppStore((state) => state.selectPoint);
   const provider = getImageryProvider(layerId);
-  const textureUrl = buildGlobalGibsTextureUrl(provider.layerId, date);
+  const globeProvider = provider.layerId ? provider : getImageryProvider("viirs-noaa20");
+  const textureUrl = buildGlobalGibsTextureUrl(globeProvider.layerId ?? "", date);
   const [loadingTextureUrl, setLoadingTextureUrl] = useState(textureUrl);
   const globeLoading = loadingTextureUrl === textureUrl;
 

@@ -38,8 +38,9 @@ export function ImageryInfoModal({ open, onOpenChange }: ImageryInfoModalProps) 
           <DialogHeader className="mb-5">
             <DialogTitle>Imagery Layers</DialogTitle>
             <DialogDescription>
-              GIBS layers are moderate-resolution NASA browse imagery. Some are natural color,
-              while others use non-visible bands to reveal fire, snow, ice, vegetation, and water.
+              Regional layers combine NASA GIBS browse imagery with Copernicus radar. Some are
+              natural color, while others use non-visible bands or radar backscatter to reveal
+              fire, snow, ice, vegetation, water, clouds, and surface texture.
             </DialogDescription>
           </DialogHeader>
 
