@@ -1,4 +1,4 @@
-import { Film, LoaderCircle, MapPinned, Satellite } from "lucide-react";
+import { Bot, Film, LoaderCircle, MapPinned, Satellite } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -8,6 +8,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatCoordinates } from "@/lib/geo";
 import {
   formatGibsCaptureTime,
@@ -24,8 +31,32 @@ import { useModalPaneSize } from "./hooks/useModalPaneSize";
 import { useObjectUrls } from "./hooks/useObjectUrls";
 import { useRegionalImagery } from "./hooks/useRegionalImagery";
 import { useTimeLapse } from "./hooks/useTimeLapse";
+import { AskViewModal, type AskProvider, type AskViewContext } from "./AskViewModal";
 import { LayerSwitcher } from "./LayerSwitcher";
 import { TimeLapseModal } from "./TimeLapseModal";
+
+function viewSignature(context: AskViewContext | null, imageUrl: string | null) {
+  if (!context || !imageUrl) {
+    return "";
+  }
+
+  return JSON.stringify({
+    imageUrl,
+    providerId: context.providerId,
+    date: context.date,
+    lat: Number(context.lat.toFixed(5)),
+    lon: Number(context.lon.toFixed(5)),
+    bbox: context.bbox
+      ? {
+          minLat: Number(context.bbox.minLat.toFixed(5)),
+          minLon: Number(context.bbox.minLon.toFixed(5)),
+          maxLat: Number(context.bbox.maxLat.toFixed(5)),
+          maxLon: Number(context.bbox.maxLon.toFixed(5)),
+        }
+      : null,
+    zoom: Number(context.imageryZoomDegrees.toFixed(5)),
+  });
+}
 
 export function ImageryModal() {
   const {
@@ -41,6 +72,9 @@ export function ImageryModal() {
     recenterPoint,
   } = useAppStore();
   const [infoOpen, setInfoOpen] = useState(false);
+  const [askOpen, setAskOpen] = useState(false);
+  const [askProvider, setAskProvider] = useState<AskProvider>("openai");
+  const [askPrompt, setAskPrompt] = useState("");
   const provider = getImageryProvider(layerId);
   const selectedLon = selectedPoint?.lon;
   const isRegionalSentinel = Boolean(provider.sentinelVariantId);
@@ -115,12 +149,33 @@ export function ImageryModal() {
     ? formatSentinelCaptureTime(date, provider.sentinelVariantId, selectedLon)
     : regionalCaptureLabel;
   const captureLabel = regionalProviderCaptureLabel;
+  const askViewContext: AskViewContext | null = selectedPoint
+    ? {
+        coordinates,
+        lat: selectedPoint.lat,
+        lon: selectedPoint.lon,
+        date,
+        captureLabel,
+        providerName: provider.name,
+        providerId: provider.id,
+        satellite: provider.satellite,
+        category: provider.category,
+        resolutionMeters: provider.resolution,
+        sentinelVariantId: provider.sentinelVariantId,
+        bbox: regionalImagery.bbox,
+        imageryZoomDegrees,
+        imageWidth: imagePaneSize?.width ?? null,
+        imageHeight: imagePaneSize?.height ?? null,
+      }
+    : null;
+  const askViewSignature = viewSignature(askViewContext, regionalImagery.imageUrl);
 
   function handleOpenChange(open: boolean) {
     if (open) {
       return;
     }
 
+    setAskOpen(false);
     closeModal();
   }
 
@@ -251,6 +306,38 @@ export function ImageryModal() {
             </div>
 
             <>
+                <div className="space-y-2 rounded-md border border-border bg-background/35 p-3">
+                  <Select
+                    value={askProvider}
+                    onValueChange={(value) => setAskProvider(value as AskProvider)}
+                  >
+                    <SelectTrigger aria-label="AI provider">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="openai">OpenAI</SelectItem>
+                      <SelectItem value="anthropic">Anthropic</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <textarea
+                    value={askPrompt}
+                    onChange={(event) => setAskPrompt(event.target.value)}
+                    rows={3}
+                    placeholder="Optional focus or context for the initial analysis"
+                    className="min-h-20 w-full resize-none rounded-md border border-input bg-background/70 px-3 py-2 text-sm text-foreground ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                  />
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={() => setAskOpen(true)}
+                    disabled={!regionalImagery.imageUrl || regionalImagery.imageLoading}
+                    className="w-full"
+                  >
+                    <Bot className="h-4 w-4" />
+                    Ask about this view
+                  </Button>
+                </div>
+
                 <div className="grid grid-cols-2 gap-2">
                   <Button
                     type="button"
@@ -317,6 +404,15 @@ export function ImageryModal() {
           </aside>
         </div>
       </DialogContent>
+      <AskViewModal
+        open={askOpen}
+        onOpenChange={setAskOpen}
+        askProvider={askProvider}
+        initialQuestion={askPrompt}
+        imageUrl={regionalImagery.imageUrl}
+        viewContext={askViewContext}
+        viewSignature={askViewSignature}
+      />
       <ImageryInfoModal open={infoOpen} onOpenChange={setInfoOpen} />
       <TimeLapseModal
         open={timeLapse.timeLapseOpen}
