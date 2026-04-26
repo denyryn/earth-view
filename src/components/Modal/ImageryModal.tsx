@@ -199,6 +199,8 @@ export function ImageryModal() {
     null,
   );
   const zoomCommitTimerRef = useRef<number | null>(null);
+  const objectUrlsRef = useRef(new Set<string>());
+  const sentinelDateRefreshScopeRef = useRef<string | null>(null);
   const [regionalDragStart, setRegionalDragStart] = useState<{
     pointerId: number;
     x: number;
@@ -215,6 +217,29 @@ export function ImageryModal() {
     imagePaneRef.current = node;
     setImagePaneNode(node);
   }, []);
+  const createObjectUrl = useCallback((blob: Blob) => {
+    const url = URL.createObjectURL(blob);
+    objectUrlsRef.current.add(url);
+    return url;
+  }, []);
+  const revokeObjectUrl = useCallback((url?: string | null) => {
+    if (!url?.startsWith("blob:")) {
+      return;
+    }
+
+    if (objectUrlsRef.current.delete(url)) {
+      URL.revokeObjectURL(url);
+    }
+  }, []);
+  const clearSentinelTimeLapseCache = useCallback(() => {
+    for (const cached of sentinelTimeLapseCacheRef.current.values()) {
+      for (const frame of cached.frames) {
+        revokeObjectUrl(frame.imageUrl);
+      }
+    }
+
+    sentinelTimeLapseCacheRef.current.clear();
+  }, [revokeObjectUrl]);
   const bbox = useMemo(() => {
     if (!selectedPoint) {
       return null;
@@ -320,7 +345,7 @@ export function ImageryModal() {
           width: 1024,
           height: 1024,
         });
-        const imageUrl = typeof result === "string" ? result : URL.createObjectURL(result);
+        const imageUrl = typeof result === "string" ? result : createObjectUrl(result);
 
         await preloadImage(imageUrl);
 
@@ -464,7 +489,7 @@ export function ImageryModal() {
             throw new Error(`${variant.name} imagery is unavailable for ${scene.dateTime}.`);
           }
 
-          const imageUrl = URL.createObjectURL(await response.blob());
+          const imageUrl = createObjectUrl(await response.blob());
           await preloadImage(imageUrl);
 
           const frame = {
@@ -623,7 +648,7 @@ export function ImageryModal() {
     }
   }
 
-  async function fetchLatestSentinelScene(sentinelBbox: BoundingBox, variantId: string) {
+  const fetchLatestSentinelScene = useCallback(async (sentinelBbox: BoundingBox, variantId: string) => {
     const variant = getSentinelVariant(variantId);
     const response = await fetch("/api/sentinel-scenes", {
       method: "POST",
@@ -645,10 +670,10 @@ export function ImageryModal() {
 
     const { scenes } = (await response.json()) as { scenes?: SentinelScene[] };
     return scenes?.[0] ?? null;
-  }
+  }, [date]);
 
   useEffect(() => {
-    if (!modalOpen || !bbox) {
+    if (!modalOpen || !bbox || mode === "sentinel") {
       return;
     }
 
@@ -671,8 +696,12 @@ export function ImageryModal() {
     setImageLoading(true);
     setError(null);
     setRegionalDragStart(null);
+
     setMode("regional");
-    setSentinelState(null);
+    setSentinelState((previous) => {
+      revokeObjectUrl(previous?.imageUrl);
+      return null;
+    });
     setSentinelError(null);
     setSentinelViewport({ scale: 1, x: 0, y: 0 });
 
@@ -683,7 +712,7 @@ export function ImageryModal() {
         width: regionalImageWidth,
         height: regionalImageHeight,
       });
-      const nextImageUrl = typeof result === "string" ? result : URL.createObjectURL(result);
+      const nextImageUrl = typeof result === "string" ? result : createObjectUrl(result);
       await preloadImage(nextImageUrl);
 
       return nextImageUrl;
@@ -736,14 +765,17 @@ export function ImageryModal() {
     };
   }, [
     bbox,
+    createObjectUrl,
     date,
     fallbackBbox,
     hasImageryView,
     imageryZoomDegrees,
     modalOpen,
+    mode,
     provider,
     regionalImageHeight,
     regionalImageWidth,
+    revokeObjectUrl,
     selectedLat,
     selectedLon,
   ]);
@@ -766,6 +798,18 @@ export function ImageryModal() {
   }, []);
 
   useEffect(() => {
+    const objectUrls = objectUrlsRef.current;
+
+    return () => {
+      for (const url of objectUrls) {
+        URL.revokeObjectURL(url);
+      }
+
+      objectUrls.clear();
+    };
+  }, []);
+
+  useEffect(() => {
     const nextScope = sentinelState
       ? [
           date,
@@ -782,8 +826,15 @@ export function ImageryModal() {
     }
 
     sentinelTimeLapseScopeRef.current = nextScope;
-    sentinelTimeLapseCacheRef.current.clear();
-  }, [date, sentinelState, sentinelViewport.scale, sentinelViewport.x, sentinelViewport.y]);
+    clearSentinelTimeLapseCache();
+  }, [
+    clearSentinelTimeLapseCache,
+    date,
+    sentinelState,
+    sentinelViewport.scale,
+    sentinelViewport.x,
+    sentinelViewport.y,
+  ]);
 
   useEffect(() => {
     if (!modalOpen || mode !== "regional") {
@@ -865,10 +916,10 @@ export function ImageryModal() {
     };
   }
 
-  async function requestSentinelImage(
+  const requestSentinelImage = useCallback(async (
     sentinelBbox: BoundingBox,
     variantId = sentinelVariantId,
-  ) {
+  ) => {
     if (!selectedPoint) {
       return;
     }
@@ -909,11 +960,21 @@ export function ImageryModal() {
       }
 
       const blob = await response.blob();
-      setSentinelState({
-        imageUrl: URL.createObjectURL(blob),
-        bbox: sentinelBbox,
-        variantId: variant.id,
-        sceneDateTime: scene?.dateTime,
+      const imageUrl = createObjectUrl(blob);
+      sentinelDateRefreshScopeRef.current = [
+        date,
+        variant.id,
+        sentinelTimeLapseBboxKey(sentinelBbox),
+      ].join("|");
+      setSentinelState((previous) => {
+        revokeObjectUrl(previous?.imageUrl);
+
+        return {
+          imageUrl,
+          bbox: sentinelBbox,
+          variantId: variant.id,
+          sceneDateTime: scene?.dateTime,
+        };
       });
       setSentinelVariantId(variant.id);
       setSentinelViewport({ scale: 1, x: 0, y: 0 });
@@ -927,7 +988,38 @@ export function ImageryModal() {
     } finally {
       setSentinelLoading(false);
     }
-  }
+  }, [
+    createObjectUrl,
+    date,
+    fetchLatestSentinelScene,
+    revokeObjectUrl,
+    selectedPoint,
+    sentinelVariantId,
+  ]);
+
+  useEffect(() => {
+    if (!modalOpen || mode !== "sentinel" || !sentinelState) {
+      sentinelDateRefreshScopeRef.current = null;
+      return;
+    }
+
+    if (sentinelLoading) {
+      return;
+    }
+
+    const nextScope = [
+      date,
+      sentinelState.variantId,
+      sentinelTimeLapseBboxKey(sentinelState.bbox),
+    ].join("|");
+
+    if (sentinelDateRefreshScopeRef.current === nextScope) {
+      return;
+    }
+
+    sentinelDateRefreshScopeRef.current = nextScope;
+    void requestSentinelImage(sentinelState.bbox, sentinelState.variantId);
+  }, [date, modalOpen, mode, requestSentinelImage, sentinelLoading, sentinelState]);
 
   async function renderSentinelImage(center = selectedPoint) {
     if (!bbox || !center) {

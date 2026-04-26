@@ -1,5 +1,5 @@
 import { ThreeEvent, useLoader, useThree } from "@react-three/fiber";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { RepeatWrapping, SRGBColorSpace, TextureLoader, Vector3 } from "three";
 import { pointToLatLon } from "@/lib/geo";
 import { BoundaryLines } from "./BoundaryLines";
@@ -12,6 +12,7 @@ type EarthProps = {
 
 export function Earth({ textureUrl, onSelect }: EarthProps) {
   const { gl } = useThree();
+  const selectedPointRef = useRef(new Vector3());
   const texture = useLoader(TextureLoader, textureUrl, (loader) => {
     loader.setCrossOrigin("anonymous");
   });
@@ -27,7 +28,7 @@ export function Earth({ textureUrl, onSelect }: EarthProps) {
   function selectEventPoint(event: ThreeEvent<MouseEvent>) {
     event.stopPropagation();
 
-    const point = new Vector3().copy(event.point).normalize();
+    const point = selectedPointRef.current.copy(event.point).normalize();
     const { lat, lon } = pointToLatLon(point);
     onSelect(lat, lon);
   }

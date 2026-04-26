@@ -91,5 +91,17 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(dirname, "./src"),
       },
     },
+    build: {
+      chunkSizeWarningLimit: 750,
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            react: ["react", "react-dom", "zustand"],
+            three: ["three"],
+            "react-three": ["@react-three/fiber", "@react-three/drei"],
+          },
+        },
+      },
+    },
   };
 });

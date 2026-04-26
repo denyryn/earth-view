@@ -201,13 +201,9 @@ export function BoundaryLines() {
     };
   }, []);
 
-  useEffect(() => {
-    return () => {
-      countryGeometry?.dispose();
-      admin1Geometry?.dispose();
-      graticuleGeometry.dispose();
-    };
-  }, [admin1Geometry, countryGeometry, graticuleGeometry]);
+  useEffect(() => () => graticuleGeometry.dispose(), [graticuleGeometry]);
+  useEffect(() => () => countryGeometry?.dispose(), [countryGeometry]);
+  useEffect(() => () => admin1Geometry?.dispose(), [admin1Geometry]);
 
   return (
     <group>

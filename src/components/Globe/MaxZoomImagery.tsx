@@ -1,7 +1,13 @@
 import { LoaderCircle, MapPinned } from "lucide-react";
 import { type MouseEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { cityLabels } from "@/lib/cities";
-import { bboxWidthKm, clamp, formatApproxDistance, formatCoordinates, normalizeLongitude } from "@/lib/geo";
+import {
+  bboxWidthKm,
+  clamp,
+  formatApproxDistance,
+  formatCoordinates,
+  normalizeLongitude,
+} from "@/lib/geo";
 import { getImageryProvider } from "@/providers/registry";
 import { useAppStore } from "@/store/useAppStore";
 import type { BoundingBox } from "@/types/imagery";
@@ -40,6 +46,16 @@ function bboxCacheKey(bbox: BoundingBox) {
   ]
     .map((value) => value.toFixed(4))
     .join(",");
+}
+
+function bboxFromCacheKey(key: string): BoundingBox | null {
+  const [minLat, minLon, maxLat, maxLon] = key.split(",").map(Number);
+
+  if ([minLat, minLon, maxLat, maxLon].some((value) => Number.isNaN(value))) {
+    return null;
+  }
+
+  return { minLat, minLon, maxLat, maxLon };
 }
 
 function preloadImage(url: string) {
@@ -89,6 +105,7 @@ export function MaxZoomImagery() {
   const imageWidth = Math.min(MAX_IMAGE_SIZE, Math.max(1024, Math.round(viewportSize.width * 1.25)));
   const imageHeight = Math.min(MAX_IMAGE_SIZE, Math.max(768, Math.round(imageWidth / aspect)));
   const activeBboxKey = activeBbox ? bboxCacheKey(activeBbox) : "";
+  const requestBbox = useMemo(() => bboxFromCacheKey(activeBboxKey), [activeBboxKey]);
   const cacheScope = activeBbox
     ? `${date}|${imageWidth}x${imageHeight}|${activeBboxKey}`
     : "";
@@ -108,19 +125,27 @@ export function MaxZoomImagery() {
   }, [labelBbox]);
 
   useEffect(() => {
+    let animationFrame = 0;
+
     function handleResize() {
-      setViewportSize({
-        width: window.innerWidth,
-        height: window.innerHeight,
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        setViewportSize({
+          width: window.innerWidth,
+          height: window.innerHeight,
+        });
       });
     }
 
     window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("resize", handleResize);
+    };
   }, []);
 
   useEffect(() => {
-    if (!activeBbox || !isVisible) {
+    if (!requestBbox || !isVisible) {
       return;
     }
 
@@ -150,7 +175,7 @@ export function MaxZoomImagery() {
 
     if (cachedImageUrl) {
       setImageUrl(cachedImageUrl);
-      setDisplayedBbox(activeBbox);
+      setDisplayedBbox(requestBbox);
       setPan({ x: 0, y: 0 });
       setCommittedPan({ x: 0, y: 0 });
       setLoading(false);
@@ -158,8 +183,6 @@ export function MaxZoomImagery() {
         cancelled = true;
       };
     }
-
-    const requestBbox = activeBbox;
 
     provider
       .fetchImage({ bbox: requestBbox, date, width: imageWidth, height: imageHeight })
@@ -192,7 +215,7 @@ export function MaxZoomImagery() {
     return () => {
       cancelled = true;
     };
-  }, [activeBbox, cacheScope, date, imageHeight, imageWidth, isVisible, provider]);
+  }, [activeBboxKey, cacheScope, date, imageHeight, imageWidth, isVisible, provider, requestBbox]);
 
   useEffect(() => {
     if (globeView?.atMaxZoom) {
