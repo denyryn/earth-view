@@ -20,10 +20,26 @@ import {
   bboxFromSpans,
   preloadImage,
 } from "./imageryModalHelpers";
-import type { ManagedObjectUrl, ModalMode } from "./types";
+import type { ManagedObjectUrl } from "./types";
 
 function imageryErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Imagery unavailable for this selection.";
+}
+
+function bboxCacheKey(bbox: {
+  minLat: number;
+  minLon: number;
+  maxLat: number;
+  maxLon: number;
+}) {
+  return [
+    bbox.minLat,
+    bbox.minLon,
+    bbox.maxLat,
+    bbox.maxLon,
+  ]
+    .map((value) => value.toFixed(5))
+    .join(",");
 }
 
 type SelectedPoint = {
@@ -40,7 +56,6 @@ type SelectedPoint = {
 type RegionalImageryOptions = ManagedObjectUrl & {
   selectedPoint: SelectedPoint | null;
   modalOpen: boolean;
-  mode: ModalMode;
   date: string;
   provider: ImageryProvider;
   imageryZoomDegrees: number;
@@ -53,7 +68,6 @@ type RegionalImageryOptions = ManagedObjectUrl & {
 export function useRegionalImagery({
   selectedPoint,
   modalOpen,
-  mode,
   date,
   provider,
   imageryZoomDegrees,
@@ -64,6 +78,7 @@ export function useRegionalImagery({
   createObjectUrl,
 }: RegionalImageryOptions) {
   const imageScopeRef = useRef<string | null>(null);
+  const imageCacheRef = useRef(new Map<string, string>());
   const wasModalOpenRef = useRef(false);
   const zoomCommitTimerRef = useRef<number | null>(null);
   const imageUrlRef = useRef<string | null>(null);
@@ -140,7 +155,7 @@ export function useRegionalImagery({
   }, []);
 
   useEffect(() => {
-    if (!modalOpen || !bbox || mode === "sentinel") {
+    if (!modalOpen || !bbox) {
       return;
     }
 
@@ -153,18 +168,39 @@ export function useRegionalImagery({
       provider.id,
     ].join("|");
     const shouldPreserveImageWhileLoading =
-      provider.id === "sentinel-1-radar" &&
+      Boolean(provider.sentinelVariantId) &&
       updateReasonRef.current !== null &&
       imageUrlRef.current !== null;
+    const cacheKey = [
+      provider.id,
+      date,
+      regionalImageWidth,
+      regionalImageHeight,
+      bboxCacheKey(bbox),
+    ].join("|");
+    const cachedImageUrl = imageCacheRef.current.get(cacheKey);
 
     if (imageScopeRef.current !== nextImageScope) {
-      if (!shouldPreserveImageWhileLoading) {
+      if (!shouldPreserveImageWhileLoading && !cachedImageUrl) {
         setManagedImageUrl(null);
         setRegionalPan({ x: 0, y: 0 });
         setCommittedRegionalPan({ x: 0, y: 0 });
       }
 
       imageScopeRef.current = nextImageScope;
+    }
+
+    if (cachedImageUrl) {
+      setManagedImageUrl(cachedImageUrl);
+      setLoadedImageZoomDegrees(requestZoomDegrees);
+      setPreviewZoomDegrees(requestZoomDegrees);
+      setRegionalPan({ x: 0, y: 0 });
+      setCommittedRegionalPan({ x: 0, y: 0 });
+      setImageLoading(false);
+      setError(null);
+      setRegionalDragStart(null);
+      setManagedUpdateReason(null);
+      return;
     }
 
     setImageLoading(true);
@@ -191,6 +227,7 @@ export function useRegionalImagery({
         }
 
         setManagedImageUrl(result);
+        imageCacheRef.current.set(cacheKey, result);
         setLoadedImageZoomDegrees(requestZoomDegrees);
         setPreviewZoomDegrees(requestZoomDegrees);
         setRegionalPan({ x: 0, y: 0 });
@@ -214,6 +251,7 @@ export function useRegionalImagery({
 
           if (!cancelled) {
             setManagedImageUrl(fallbackImageUrl);
+            imageCacheRef.current.set(cacheKey, fallbackImageUrl);
             setLoadedImageZoomDegrees(requestZoomDegrees);
             setPreviewZoomDegrees(requestZoomDegrees);
             setRegionalPan({ x: 0, y: 0 });
@@ -241,7 +279,6 @@ export function useRegionalImagery({
     hasImageryView,
     imageryZoomDegrees,
     modalOpen,
-    mode,
     provider,
     regionalImageHeight,
     regionalImageWidth,

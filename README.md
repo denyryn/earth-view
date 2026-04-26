@@ -1,18 +1,18 @@
 # Earth View
 
-Earth View is an interactive satellite-imagery globe built with React, Vite, Three.js, and Tailwind CSS. It starts as a full-screen 3D Earth using NASA GIBS daily imagery, then lets you select places, inspect regional optical and radar imagery, compare layers, build short time-lapse sequences, and request higher-resolution Copernicus Sentinel scenes for a focused area.
+Earth View is an interactive satellite-imagery globe built with React, Vite, Three.js, and Tailwind CSS. It starts as a full-screen 3D Earth using NASA GIBS daily imagery, then lets you select places, inspect regional NASA and Copernicus Sentinel imagery, compare layers, and build short time-lapse sequences.
 
 The app is intentionally exploratory: orbit the planet, zoom into a region, choose a date and imagery layer, then step into a detailed modal workspace when a location is worth inspecting.
 
 ## What It Does
 
 - Renders an interactive 3D globe with NASA GIBS WMS imagery wrapped onto a Three.js sphere.
-- Supports daily MODIS and VIIRS true-color and false-color layers plus regional Sentinel-1 radar.
+- Supports daily MODIS and VIIRS true-color and false-color layers plus regional Sentinel-2 optical and Sentinel-1 radar layers.
 - Shows country borders, state/province boundaries, graticule lines, and tiered city labels.
 - Switches into a higher-detail 2D imagery overlay when the camera reaches max zoom.
 - Opens a regional imagery modal from shift-click or right-click selection.
 - Supports date selection, layer switching, pan/zoom, and 7-day or 30-day regional time lapses.
-- Requests Copernicus Sentinel-2 optical and Sentinel-1 radar imagery through local/API server handlers.
+- Requests Copernicus Sentinel-2 optical and Sentinel-1 radar imagery in the same regional modal through local/API server handlers.
 - Provides Sentinel scene searches, scene-based time lapses, a five-year sampled comparison, and GIF export for Sentinel sequences.
 
 ## Data Sources
@@ -31,16 +31,16 @@ The default imagery providers use NASA GIBS WMS:
 
 These layers are treated as one complete global frame per day. The app defaults to the latest likely complete true-color day, with a small lag to avoid requesting incomplete current-day imagery.
 
-The regional imagery provider list also includes Sentinel-1 radar rendered through the local/API Sentinel handler. This layer uses the same regional bbox, drag, and zoom workflow as the NASA layers, but it requires Copernicus credentials and represents the latest available radar pass near the selected date rather than a global daily GIBS frame.
+The regional imagery provider list also includes Copernicus Sentinel layers rendered through the local/API Sentinel handler. These layers use the same regional bbox, drag, and zoom workflow as the NASA layers, but they require Copernicus credentials and represent the latest available scene near the selected date rather than a global daily GIBS frame.
 
 ### Copernicus Sentinel
 
-The high-resolution workspace uses Copernicus Data Space / Sentinel Hub APIs through server-side endpoints:
+The regional Sentinel layers use Copernicus Data Space / Sentinel Hub APIs through server-side endpoints:
 
 - Sentinel-2 true color
 - Sentinel-2 false color infrared
 - Sentinel-2 SWIR
-- Sentinel-1 radar, also exposed as a regional first-modal layer
+- Sentinel-1 radar
 
 Sentinel requests require API credentials. Without credentials, the NASA GIBS globe and regional views still work, but Sentinel rendering and Sentinel scene searches will return a configuration error.
 
@@ -93,12 +93,11 @@ npm run lint     # Run ESLint
 
 - Drag the globe to rotate Earth.
 - Scroll or pinch to zoom.
-- Use the imagery panel or number keys to switch NASA GIBS and regional Sentinel-1 radar layers.
+- Use the imagery panel or number keys to switch available NASA GIBS and regional Sentinel layers.
 - At max zoom, the app replaces the globe view with a higher-detail WMS image for the current viewport.
 - Shift-click or right-click the globe or max-zoom image to select a point and open the imagery modal.
 - In the regional modal, drag to pan, scroll to zoom, change the date, switch layers, or build 7-day and 30-day time lapses.
-- Click "Render Sentinel-2 high-res" to request a focused Sentinel scene for the selected area.
-- In Sentinel mode, switch Sentinel variants, refine the current client-side zoom into a new server-rendered image, request scene sequences, or export a GIF.
+- For Sentinel layers, the time-lapse controls search and render scene sequences, including a five-year sampled comparison and GIF export.
 
 ## Project Structure
 
@@ -112,7 +111,7 @@ npm run lint     # Run ESLint
 │   ├── main.tsx                # React entry point
 │   ├── components/
 │   │   ├── Globe/              # Three.js globe, overlays, labels, controls, max-zoom imagery
-│   │   ├── Modal/              # Imagery modal UI, hooks, Sentinel workspace, layer/date/time-lapse dialogs
+│   │   ├── Modal/              # Imagery modal UI, hooks, layer/date/time-lapse dialogs
 │   │   └── ui/                 # Small Radix/Tailwind UI primitives
 │   ├── lib/
 │   │   ├── captureTime.ts      # Estimated and exact capture-time formatting
@@ -124,6 +123,7 @@ npm run lint     # Run ESLint
 │   │   └── utils.ts            # Shared class-name utility
 │   ├── providers/
 │   │   ├── GibsProvider.ts     # NASA GIBS WMS URL builder/provider implementation
+│   │   ├── SentinelProvider.ts # Copernicus Sentinel regional provider implementation
 │   │   └── registry.ts         # Registered imagery providers
 │   ├── server/
 │   │   └── sentinel.ts         # Sentinel auth, image requests, catalog searches, validation
@@ -143,7 +143,7 @@ npm run lint     # Run ESLint
 
 ### Rendering Flow
 
-`src/components/Globe/Globe.tsx` owns the Three.js canvas. It builds a global NASA GIBS texture URL for globe-capable providers, renders the Earth sphere, and reports camera-derived viewport information back to the Zustand store. Regional-only providers such as Sentinel-1 radar keep the globe on the default global true-color texture while the regional modal renders the selected radar layer.
+`src/components/Globe/Globe.tsx` owns the Three.js canvas. It builds a global NASA GIBS texture URL for globe-capable providers, renders the Earth sphere, and reports camera-derived viewport information back to the Zustand store. Regional-only Sentinel providers keep the globe on the default global true-color texture while the regional modal renders the selected Sentinel layer.
 
 `src/components/Globe/MaxZoomImagery.tsx` listens for max-zoom globe state. When the camera is close enough, it requests a WMS image for the visible bounding box and presents it as a 2D overlay. This allows clearer local inspection than stretching the global sphere texture.
 
@@ -159,11 +159,11 @@ npm run lint     # Run ESLint
 - imagery zoom level
 - camera focus requests
 
-`src/components/Modal/ImageryModal.tsx` is the main inspection workspace. It keeps the dialog layout and control wiring in one place, while `src/components/Modal/hooks/` owns the focused behavior for pane sizing, object URL cleanup, regional GIBS loading, Sentinel image requests, and time-lapse orchestration.
+`src/components/Modal/ImageryModal.tsx` is the main inspection workspace. It keeps the dialog layout and control wiring in one place, while `src/components/Modal/hooks/` owns the focused behavior for pane sizing, object URL cleanup, regional imagery loading, Sentinel scene requests, and time-lapse orchestration.
 
 ### Imagery Providers
 
-Regional imagery follows a provider interface in `src/types/imagery.ts`. `GibsProvider` implements that interface by producing WMS `GetMap` URLs. `SentinelRadarProvider` implements the same interface by requesting Sentinel-1 radar through the server/API layer. The registry in `src/providers/registry.ts` is the main place to add, remove, or reorder regional layers.
+Regional imagery follows a provider interface in `src/types/imagery.ts`. `GibsProvider` implements that interface by producing WMS `GetMap` URLs. `SentinelProvider` implements the same interface by requesting Sentinel imagery through the server/API layer. The registry in `src/providers/registry.ts` is the main place to add, remove, or reorder regional layers.
 
 Sentinel imagery is modeled separately in `src/lib/sentinelVariants.ts` because each layer needs a Copernicus collection, resolution, request window, and evalscript.
 

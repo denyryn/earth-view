@@ -1,7 +1,6 @@
 import type { BoundingBox } from "@/types/imagery";
 import type { TimeLapseFrame } from "../TimeLapseModal";
 
-export type ModalMode = "regional" | "sentinel";
 export type TimeLapseMode = 7 | 30 | "5y";
 
 export type SentinelState = {

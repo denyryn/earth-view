@@ -1,7 +1,7 @@
 import { Layers } from "lucide-react";
 import type { ReactNode } from "react";
 import { Label } from "@/components/ui/label";
-import { imageryProviders } from "@/providers/registry";
+import { modalImageryProviders } from "@/providers/registry";
 
 type LayerSwitcherProps = {
   value: string;
@@ -20,7 +20,7 @@ export function LayerSwitcher({ value, onValueChange, action }: LayerSwitcherPro
         {action}
       </div>
       <div className="space-y-1">
-        {imageryProviders.map((provider, index) => {
+        {modalImageryProviders.map((provider, index) => {
           const selected = provider.id === value;
 
           return (

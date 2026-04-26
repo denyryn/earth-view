@@ -7,7 +7,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { sentinelVariants } from "@/lib/sentinelVariants";
 import { imageryProviders } from "@/providers/registry";
 
 type ImageryInfoModalProps = {
@@ -38,9 +37,9 @@ export function ImageryInfoModal({ open, onOpenChange }: ImageryInfoModalProps) 
           <DialogHeader className="mb-5">
             <DialogTitle>Imagery Layers</DialogTitle>
             <DialogDescription>
-              Regional layers combine NASA GIBS browse imagery with Copernicus radar. Some are
-              natural color, while others use non-visible bands or radar backscatter to reveal
-              fire, snow, ice, vegetation, water, clouds, and surface texture.
+              Regional layers combine NASA GIBS browse imagery with Copernicus Sentinel optical
+              and radar views. Some are natural color, while others use non-visible bands or radar
+              backscatter to reveal fire, snow, ice, vegetation, water, clouds, and surface texture.
             </DialogDescription>
           </DialogHeader>
 
@@ -68,41 +67,6 @@ export function ImageryInfoModal({ open, onOpenChange }: ImageryInfoModalProps) 
               </section>
             ))}
           </div>
-
-          <section className="mt-5 rounded-md border border-primary/35 bg-primary/10 p-4">
-            <h3 className="text-sm font-semibold">Detailed Sentinel Layers</h3>
-            <p className="mt-2 text-sm text-muted-foreground">
-              Sentinel-2 provides optical detail and Sentinel-1 provides radar imagery for cloudy
-              or night scenes. Radar is all-weather, but it is analytical rather than photographic.
-            </p>
-            <div className="mt-3 space-y-3">
-              {sentinelVariants.map((variant) => (
-                <section
-                  key={variant.id}
-                  className="rounded-md border border-border/70 bg-background/60 p-3"
-                >
-                  <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-1">
-                    <h4 className="text-sm font-semibold">{variant.name}</h4>
-                    <span className="rounded-sm bg-secondary px-1.5 py-0.5 text-[11px] text-secondary-foreground">
-                      {variant.category}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {variant.resolution}m nominal
-                    </span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">{variant.summary}</p>
-                  <p className="mt-1 text-sm">
-                    <span className="font-medium text-foreground">Best for:</span>{" "}
-                    <span className="text-muted-foreground">{variant.bestFor}</span>
-                  </p>
-                  <p className="mt-1 text-sm">
-                    <span className="font-medium text-foreground">Watch out:</span>{" "}
-                    <span className="text-muted-foreground">{variant.caveat}</span>
-                  </p>
-                </section>
-              ))}
-            </div>
-          </section>
         </div>
       </DialogContent>
     </Dialog>

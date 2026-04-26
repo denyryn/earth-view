@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { getRecentIsoDates } from "@/lib/dates";
 import { getSentinelVariant } from "@/lib/sentinelVariants";
 import type { BoundingBox, ImageryProvider } from "@/types/imagery";
-import type { SentinelViewport } from "../SentinelWorkspace";
 import type { TimeLapseFrame } from "../TimeLapseModal";
 import {
   addUtcYears,
@@ -21,7 +20,6 @@ import {
 import type {
   ManagedObjectUrl,
   SentinelScene,
-  SentinelState,
   SentinelTimeLapseCacheValue,
   TimeLapseMode,
 } from "./types";
@@ -30,16 +28,12 @@ type TimeLapseOptions = ManagedObjectUrl & {
   bbox: BoundingBox | null;
   date: string;
   provider: ImageryProvider;
-  sentinelState: SentinelState;
-  sentinelViewport: SentinelViewport;
 };
 
 export function useTimeLapse({
   bbox,
   date,
   provider,
-  sentinelState,
-  sentinelViewport,
   createObjectUrl,
   revokeObjectUrl,
 }: TimeLapseOptions) {
@@ -65,44 +59,21 @@ export function useTimeLapse({
     sentinelTimeLapseCacheRef.current.clear();
   }, [revokeObjectUrl]);
 
-  function getSentinelTimeLapseScope() {
-    if (!sentinelState) {
-      return null;
-    }
-
-    return [
-      date,
-      sentinelState.variantId,
-      sentinelTimeLapseBboxKey(sentinelState.bbox),
-      sentinelViewport.scale.toFixed(3),
-      sentinelViewport.x.toFixed(1),
-      sentinelViewport.y.toFixed(1),
-    ].join("|");
-  }
-
-  const getRegionalSentinelRadarScope = useCallback(() => {
-    if (!bbox || provider.id !== "sentinel-1-radar") {
+  const getRegionalSentinelScope = useCallback(() => {
+    if (!bbox || !provider.sentinelVariantId) {
       return null;
     }
 
     return [
       date,
       provider.id,
+      provider.sentinelVariantId,
       sentinelTimeLapseBboxKey(bbox),
     ].join("|");
-  }, [bbox, date, provider.id]);
+  }, [bbox, date, provider.id, provider.sentinelVariantId]);
 
   useEffect(() => {
-    const nextScope = sentinelState
-      ? [
-          date,
-          sentinelState.variantId,
-          sentinelTimeLapseBboxKey(sentinelState.bbox),
-          sentinelViewport.scale.toFixed(3),
-          sentinelViewport.x.toFixed(1),
-          sentinelViewport.y.toFixed(1),
-        ].join("|")
-      : getRegionalSentinelRadarScope();
+    const nextScope = getRegionalSentinelScope();
 
     if (sentinelTimeLapseScopeRef.current === nextScope) {
       return;
@@ -112,12 +83,7 @@ export function useTimeLapse({
     clearSentinelTimeLapseCache();
   }, [
     clearSentinelTimeLapseCache,
-    date,
-    getRegionalSentinelRadarScope,
-    sentinelState,
-    sentinelViewport.scale,
-    sentinelViewport.x,
-    sentinelViewport.y,
+    getRegionalSentinelScope,
   ]);
 
   async function loadTimeLapse(dayCount: 7 | 30) {
@@ -208,14 +174,8 @@ export function useTimeLapse({
     scenes: SentinelScene[],
     requestedCount: number,
     cacheKey: string | null,
-    renderTarget = sentinelState
-      ? { bbox: sentinelState.bbox, variantId: sentinelState.variantId }
-      : null,
+    renderTarget: { bbox: BoundingBox; variantId: string },
   ) {
-    if (!renderTarget) {
-      return;
-    }
-
     const variant = getSentinelVariant(renderTarget.variantId);
     const activeBbox = renderTarget.bbox;
     const distinctScenes = scenes
@@ -328,58 +288,13 @@ export function useTimeLapse({
     }
   }
 
-  async function loadSentinelTimeLapse(dayCount: 7 | 30) {
-    if (!sentinelState) {
+  async function loadRegionalSentinelTimeLapse(dayCount: 7 | 30) {
+    if (!bbox || !provider.sentinelVariantId) {
       return;
     }
 
-    const variant = getSentinelVariant(sentinelState.variantId);
-    const cacheScope = getSentinelTimeLapseScope();
-    const cacheKey = cacheScope ? `${cacheScope}|${dayCount}` : null;
-    const cached = cacheKey ? sentinelTimeLapseCacheRef.current.get(cacheKey) : undefined;
-
-    setTimeLapseMode(dayCount);
-    setTimeLapseOpen(true);
-
-    if (cached) {
-      setTimeLapseFrames(cached.frames);
-      setTimeLapseError(cached.error);
-      setTimeLapseLoading(false);
-      setTimeLapseLoadingProgress(null);
-      return;
-    }
-
-    setTimeLapseFrames([]);
-    setTimeLapseError(null);
-    setTimeLapseLoadingProgress(null);
-    setTimeLapseLoading(true);
-
-    try {
-      const scenes = await fetchSentinelScenesForWindow(
-        sentinelState.bbox,
-        variant.id,
-        date,
-        SENTINEL_SCENE_SEARCH_LIMIT,
-        SENTINEL_SCENE_LOOKBACK_DAYS,
-      );
-      await renderSentinelTimeLapseFrames(scenes, dayCount, cacheKey);
-    } catch (sceneError) {
-      setTimeLapseFrames([]);
-      setTimeLapseLoading(false);
-      setTimeLapseLoadingProgress(null);
-      setTimeLapseError(
-        sceneError instanceof Error ? sceneError.message : "Sentinel scene search failed.",
-      );
-    }
-  }
-
-  async function loadRegionalSentinelRadarTimeLapse(dayCount: 7 | 30) {
-    if (!bbox) {
-      return;
-    }
-
-    const variant = getSentinelVariant("s1-radar");
-    const cacheScope = getRegionalSentinelRadarScope();
+    const variant = getSentinelVariant(provider.sentinelVariantId);
+    const cacheScope = getRegionalSentinelScope();
     const cacheKey = cacheScope ? `${cacheScope}|${dayCount}` : null;
     const cached = cacheKey ? sentinelTimeLapseCacheRef.current.get(cacheKey) : undefined;
 
@@ -416,18 +331,18 @@ export function useTimeLapse({
       setTimeLapseLoading(false);
       setTimeLapseLoadingProgress(null);
       setTimeLapseError(
-        sceneError instanceof Error ? sceneError.message : "Sentinel-1 radar scene search failed.",
+        sceneError instanceof Error ? sceneError.message : "Sentinel scene search failed.",
       );
     }
   }
 
-  async function loadSentinelFiveYearTimeLapse() {
-    if (!sentinelState) {
+  async function loadRegionalSentinelFiveYearTimeLapse() {
+    if (!bbox || !provider.sentinelVariantId) {
       return;
     }
 
-    const variant = getSentinelVariant(sentinelState.variantId);
-    const cacheScope = getSentinelTimeLapseScope();
+    const variant = getSentinelVariant(provider.sentinelVariantId);
+    const cacheScope = getRegionalSentinelScope();
     const cacheKey = cacheScope ? `${cacheScope}|5y` : null;
     const cached = cacheKey ? sentinelTimeLapseCacheRef.current.get(cacheKey) : undefined;
 
@@ -454,7 +369,7 @@ export function useTimeLapse({
       for (let index = 4; index >= 0; index -= 1) {
         const windowEndDate = addUtcYears(endDate, -index);
         const scenes = await fetchSentinelScenesForWindow(
-          sentinelState.bbox,
+          bbox,
           variant.id,
           isoDateFromDate(windowEndDate),
           SENTINEL_YEAR_SCENE_SEARCH_LIMIT,
@@ -470,6 +385,10 @@ export function useTimeLapse({
         selectedScenes,
         SENTINEL_YEAR_SCENE_SAMPLE_SIZE * 5,
         cacheKey,
+        {
+          bbox,
+          variantId: variant.id,
+        },
       );
     } catch (sceneError) {
       setTimeLapseFrames([]);
@@ -490,8 +409,7 @@ export function useTimeLapse({
     timeLapseMode,
     setTimeLapseOpen,
     loadTimeLapse,
-    loadSentinelTimeLapse,
-    loadRegionalSentinelRadarTimeLapse,
-    loadSentinelFiveYearTimeLapse,
+    loadRegionalSentinelTimeLapse,
+    loadRegionalSentinelFiveYearTimeLapse,
   };
 }

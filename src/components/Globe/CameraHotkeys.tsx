@@ -53,7 +53,9 @@ export function CameraHotkeys() {
     <aside className="pointer-events-auto absolute right-4 top-1/2 z-10 w-[min(220px,calc(100vw-2rem))] -translate-y-1/2 rounded-lg border border-white/10 bg-background/60 p-2.5 shadow-2xl backdrop-blur md:right-6">
       <div className="mb-1.5 flex items-baseline justify-between gap-3">
         <h2 className="text-xs font-semibold tracking-normal text-foreground">Imagery</h2>
-        <span className="text-[11px] text-muted-foreground">1-{visibleProviders.length}</span>
+        <span className="text-[11px] text-muted-foreground">
+          1-{Math.min(9, visibleProviders.length)}
+        </span>
       </div>
       <div className="space-y-0.5">
         {visibleProviders.map((provider, index) => {

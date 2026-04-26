@@ -24,5 +24,6 @@ export interface ImageryProvider {
   bestFor: string;
   caveat: string;
   loadingMessage?: string;
+  sentinelVariantId?: string;
   fetchImage(params: ImageryRequest): Promise<string | Blob>;
 }

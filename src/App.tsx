@@ -12,8 +12,8 @@ export default function App() {
   const layerId = useAppStore((state) => state.layerId);
   const globeView = useAppStore((state) => state.globeView);
   const provider = getImageryProvider(layerId);
-  const captureLabel = provider.id === "sentinel-1-radar"
-    ? formatSentinelCaptureTime(date, "s1-radar", globeView?.lon)
+  const captureLabel = provider.sentinelVariantId
+    ? formatSentinelCaptureTime(date, provider.sentinelVariantId, globeView?.lon)
     : formatGibsCaptureTime(date, provider.id, globeView?.lon);
 
   return (

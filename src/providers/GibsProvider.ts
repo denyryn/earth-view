@@ -64,6 +64,7 @@ export class GibsProvider implements ImageryProvider {
   caveat: string;
   requiresAuth = false;
   loadingMessage?: string;
+  sentinelVariantId?: string;
 
   constructor(config: GibsLayerConfig) {
     this.id = config.id;
