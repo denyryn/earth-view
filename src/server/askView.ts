@@ -2,7 +2,7 @@ import type { BoundingBox } from "../types/imagery";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
-const OPENAI_MODEL = "gpt-5.2-pro";
+const OPENAI_MODEL = "gpt-5.2";
 const ANTHROPIC_MODEL = "claude-opus-4-1-20250805";
 
 export type AskProvider = "openai" | "anthropic";
@@ -293,7 +293,7 @@ function openAiBody(request: ReturnType<typeof validateRequest>, stream = false)
     instructions: systemPrompt(),
     input,
     reasoning: {
-      effort: "xhigh",
+      effort: "high",
     },
     tools: [
       {
