@@ -377,7 +377,7 @@ export function ImageryModal() {
                     ) : (
                       <Film className="h-4 w-4" />
                     )}
-                    {isRegionalSentinel ? "7 scenes" : "7 days"}
+                    {isRegionalSentinel ? "7 mosaics" : "7 days"}
                   </Button>
                   <Button
                     type="button"
@@ -395,7 +395,7 @@ export function ImageryModal() {
                     ) : (
                       <Film className="h-4 w-4" />
                     )}
-                    {isRegionalSentinel ? "30 scenes" : "30 days"}
+                    {isRegionalSentinel ? "30 mosaics" : "30 days"}
                   </Button>
                 </div>
 
@@ -446,11 +446,11 @@ export function ImageryModal() {
         title={
           isRegionalSentinel
             ? `${provider.name} · ${
-                timeLapse.timeLapseMode === "5y" ? "Last 5 years" : `${timeLapse.timeLapseMode} scenes`
+                timeLapse.timeLapseMode === "5y" ? "Last 5 years" : `${timeLapse.timeLapseMode} mosaics`
               }`
             : `${provider.name} · ${timeLapse.timeLapseMode} days`
         }
-        frameCountLabel={isRegionalSentinel ? "scene frames" : undefined}
+        frameCountLabel={isRegionalSentinel ? "mosaic frames" : undefined}
         frameIntervalMs={TIME_LAPSE_SPEEDS[timeLapse.timeLapseMode]}
         allowSequenceDownload={isRegionalSentinel}
       />

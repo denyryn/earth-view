@@ -178,15 +178,19 @@ export function useTimeLapse({
   ) {
     const variant = getSentinelVariant(renderTarget.variantId);
     const activeBbox = renderTarget.bbox;
-    const distinctScenes = scenes
+    const distinctSceneDates = new Map<string, SentinelScene>();
+    scenes
       .filter(
         (scene, index, allScenes) =>
           allScenes.findIndex((candidate) => candidate.dateTime === scene.dateTime) === index,
       )
-      .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime());
-    const scenesToRender = distinctScenes.slice(-requestedCount);
+      .sort((a, b) => new Date(a.dateTime).getTime() - new Date(b.dateTime).getTime())
+      .forEach((scene) => {
+        distinctSceneDates.set(isoDateFromDate(new Date(scene.dateTime)), scene);
+      });
+    const scenesToRender = Array.from(distinctSceneDates.values()).slice(-requestedCount);
 
-    if (distinctScenes.length === 0) {
+    if (distinctSceneDates.size === 0) {
       const nextError = `No distinct ${variant.name} scenes were found for this view.`;
       setTimeLapseFrames([]);
       setTimeLapseLoading(false);
@@ -212,6 +216,7 @@ export function useTimeLapse({
     async function renderNextScene() {
       while (nextSceneIndex < scenesToRender.length) {
         const scene = scenesToRender[nextSceneIndex];
+        const frameDate = isoDateFromDate(new Date(scene.dateTime));
         nextSceneIndex += 1;
 
         try {
@@ -222,8 +227,7 @@ export function useTimeLapse({
             },
             body: JSON.stringify({
               bbox: activeBbox,
-              date,
-              sceneDateTime: scene.dateTime,
+              date: frameDate,
               variantId: variant.id,
               width: SENTINEL_RENDER_SIZE,
               height: SENTINEL_RENDER_SIZE,
@@ -238,7 +242,7 @@ export function useTimeLapse({
           await preloadImage(imageUrl);
 
           const frame = {
-            date: scene.dateTime,
+            date: frameDate,
             imageUrl,
           };
 
@@ -271,11 +275,11 @@ export function useTimeLapse({
     let nextError: string | null = null;
 
     if (loadedSceneFrames.length === 0) {
-      nextError = `No ${variant.name} scene frames were available for this view.`;
+      nextError = `No ${variant.name} mosaic frames were available for this view.`;
     } else if (loadedSceneFrames.length < scenesToRender.length) {
-      nextError = "Some Sentinel scene frames were unavailable, so the sequence is partial.";
+      nextError = "Some Sentinel mosaic frames were unavailable, so the sequence is partial.";
     } else if (loadedSceneFrames.length < requestedCount) {
-      nextError = `Only ${loadedSceneFrames.length} distinct scenes were found in the latest available imagery.`;
+      nextError = `Only ${loadedSceneFrames.length} distinct mosaic dates were found in the latest available imagery.`;
     }
 
     setTimeLapseError(nextError);

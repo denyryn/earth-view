@@ -10,7 +10,7 @@ import {
   Wind,
   X,
 } from "lucide-react";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { getImageryProvider, imageryProviders } from "@/providers/registry";
 import { type ActivityOverlayKey, useAppStore } from "@/store/useAppStore";
 
@@ -34,6 +34,9 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 export function CameraHotkeys() {
+  const overlayMenuRef = useRef<HTMLDivElement>(null);
+  const [overlayMenuOpen, setOverlayMenuOpen] = useState(false);
+  const [hoveredOverlayId, setHoveredOverlayId] = useState<string | null>(null);
   const layerId = useAppStore((state) => state.layerId);
   const imageryVisible = useAppStore((state) => state.imageryVisible);
   const overlayLayerIds = useAppStore((state) => state.overlayLayerIds);
@@ -64,6 +67,7 @@ export function CameraHotkeys() {
       ),
     [layerId, overlayLayerIds],
   );
+  const hoveredOverlay = hoveredOverlayId ? getImageryProvider(hoveredOverlayId) : null;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -85,11 +89,43 @@ export function CameraHotkeys() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [modalOpen, setLayer, visibleProviders]);
 
+  useEffect(() => {
+    if (!overlayMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      if (
+        overlayMenuRef.current &&
+        event.target instanceof Node &&
+        !overlayMenuRef.current.contains(event.target)
+      ) {
+        setOverlayMenuOpen(false);
+        setHoveredOverlayId(null);
+      }
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOverlayMenuOpen(false);
+        setHoveredOverlayId(null);
+      }
+    }
+
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [overlayMenuOpen]);
+
   if (modalOpen) {
     return null;
   }
 
   return (
+    <>
     <aside className="pointer-events-auto absolute right-4 top-1/2 z-10 flex max-h-[calc(100vh-2rem)] w-[min(220px,calc(100vw-2rem))] -translate-y-1/2 flex-col overflow-y-auto overscroll-contain rounded-lg border border-white/10 bg-background/60 p-2.5 shadow-2xl backdrop-blur md:right-6">
       <div className="mb-1.5 flex items-baseline justify-between gap-3">
         <h2 className="text-xs font-semibold tracking-normal text-foreground">Imagery</h2>
@@ -213,24 +249,47 @@ export function CameraHotkeys() {
           </ul>
         ) : null}
         {overlayCandidates.length > 0 ? (
-          <select
-            value=""
-            onChange={(event) => {
-              if (event.target.value) {
-                addOverlayLayer(event.target.value);
-                event.target.value = "";
-              }
-            }}
-            className="w-full rounded-md border border-white/10 bg-background/60 px-2 py-1 text-[11px] text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-            aria-label="Add overlay"
-          >
-            <option value="">+ Add overlay…</option>
-            {overlayCandidates.map((provider) => (
-              <option key={provider.id} value={provider.id}>
-                {provider.name}
-              </option>
-            ))}
-          </select>
+          <div ref={overlayMenuRef} className="relative">
+            <button
+              type="button"
+              onClick={() => setOverlayMenuOpen((open) => !open)}
+              className="flex w-full items-center justify-between gap-2 rounded-md border border-white/10 bg-background/60 px-2 py-1 text-left text-[11px] text-foreground transition-colors hover:border-primary/50 focus:outline-none focus:ring-1 focus:ring-primary"
+              aria-expanded={overlayMenuOpen}
+              aria-haspopup="listbox"
+            >
+              <span>+ Add overlay...</span>
+              <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            </button>
+            {overlayMenuOpen ? (
+              <div
+                className="absolute bottom-[calc(100%+0.35rem)] left-0 z-20 max-h-[min(48vh,360px)] w-[min(280px,calc(100vw-2rem))] overflow-y-auto rounded-md border border-white/15 bg-popover/95 p-1 shadow-2xl backdrop-blur"
+                role="listbox"
+                aria-label="Add overlay"
+                onMouseLeave={() => setHoveredOverlayId(null)}
+              >
+                {overlayCandidates.map((provider) => (
+                  <button
+                    key={provider.id}
+                    type="button"
+                    role="option"
+                    onClick={() => {
+                      addOverlayLayer(provider.id);
+                      setOverlayMenuOpen(false);
+                      setHoveredOverlayId(null);
+                    }}
+                    onFocus={() => setHoveredOverlayId(provider.id)}
+                    onMouseEnter={() => setHoveredOverlayId(provider.id)}
+                    className="flex w-full flex-col rounded-sm px-2 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:bg-primary/20 hover:text-foreground focus:bg-primary/20 focus:text-foreground focus:outline-none"
+                  >
+                    <span className="font-medium leading-tight">{provider.name}</span>
+                    <span className="text-[10px] leading-tight opacity-75">
+                      {provider.category} · {provider.resolution}m
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </div>
       <div className="mt-2 border-t border-white/10 pt-2">
@@ -260,5 +319,29 @@ export function CameraHotkeys() {
         </div>
       </div>
     </aside>
+    {hoveredOverlay && overlayMenuOpen ? (
+      <div className="pointer-events-none fixed left-1/2 top-1/2 z-20 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/15 bg-background/94 p-4 text-sm text-foreground shadow-2xl backdrop-blur-md">
+        <div className="mb-2 flex items-start justify-between gap-4">
+          <div>
+            <div className="text-base font-semibold leading-tight">{hoveredOverlay.name}</div>
+            <div className="mt-1 text-xs text-muted-foreground">
+              {hoveredOverlay.satellite} · {hoveredOverlay.category} · {hoveredOverlay.resolution}m nominal
+            </div>
+          </div>
+        </div>
+        <p className="text-sm leading-relaxed text-foreground/90">{hoveredOverlay.summary}</p>
+        <div className="mt-3 space-y-2 border-t border-white/10 pt-3 text-xs leading-relaxed text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground">Best for: </span>
+            {hoveredOverlay.bestFor}
+          </p>
+          <p>
+            <span className="font-medium text-foreground">Watch for: </span>
+            {hoveredOverlay.caveat}
+          </p>
+        </div>
+      </div>
+    ) : null}
+    </>
   );
 }
