@@ -1,7 +1,7 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
 import { LoaderCircle } from "lucide-react";
-import { Suspense, useCallback, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Raycaster, Sphere, Vector2, Vector3 } from "three";
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 import { buildGlobalGibsTextureUrl } from "@/providers/GibsProvider";
@@ -164,7 +164,9 @@ export function Globe() {
   const imageryVisible = useAppStore((state) => state.imageryVisible);
   const overlayLayerIds = useAppStore((state) => state.overlayLayerIds);
   const activityOverlays = useAppStore((state) => state.activityOverlays);
+  const overlayLoadStatuses = useAppStore((state) => state.overlayLoadStatuses);
   const selectPoint = useAppStore((state) => state.selectPoint);
+  const setOverlayLoadStatus = useAppStore((state) => state.setOverlayLoadStatus);
   const provider = getImageryProvider(layerId);
   const globeProvider = provider.layerId ? provider : getImageryProvider("viirs-noaa20");
   const baseDate = globeProvider.fixedDate ?? date;
@@ -174,23 +176,42 @@ export function Globe() {
   const upgradeTextureUrl = buildGlobalGibsTextureUrl(globeProvider.layerId ?? "", baseDate, {
     width: DETAILED_GLOBE_TEXTURE_WIDTH,
   });
-  const overlayTextures = overlayLayerIds
-    .map((id) => {
-      const overlay = getImageryProvider(id);
-      if (!overlay.layerId) return null;
-      const overlayDate = overlay.fixedDate ?? date;
-      return {
-        id,
-        url: buildGlobalGibsTextureUrl(overlay.layerId, overlayDate, { transparent: true }),
-      };
-    })
-    .filter((entry): entry is { id: string; url: string } => entry !== null);
+  const overlayTextures = useMemo(
+    () =>
+      overlayLayerIds
+        .map((id) => {
+          const overlay = getImageryProvider(id);
+          if (!overlay.layerId) return null;
+          const overlayDate = overlay.fixedDate ?? date;
+          return {
+            id,
+            url: buildGlobalGibsTextureUrl(overlay.layerId, overlayDate, { transparent: true }),
+          };
+        })
+        .filter((entry): entry is { id: string; url: string } => entry !== null),
+    [date, overlayLayerIds],
+  );
   const [loadedTextureUrl, setLoadedTextureUrl] = useState<string | null>(null);
   const globeLoading = loadedTextureUrl !== textureUrl && loadedTextureUrl !== upgradeTextureUrl;
 
   const handleEarthReady = useCallback((url: string) => {
     setLoadedTextureUrl(url);
   }, []);
+
+  const handleOverlayReady = useCallback(
+    (id: string, url: string) => {
+      setOverlayLoadStatus(id, { state: "loaded", url });
+    },
+    [setOverlayLoadStatus],
+  );
+
+  useEffect(() => {
+    overlayTextures.forEach((overlay) => {
+      if (overlayLoadStatuses[overlay.id]?.url !== overlay.url) {
+        setOverlayLoadStatus(overlay.id, { state: "loading", url: overlay.url });
+      }
+    });
+  }, [overlayLoadStatuses, overlayTextures, setOverlayLoadStatus]);
 
   return (
     <div
@@ -223,6 +244,7 @@ export function Globe() {
             overlayTextures={overlayTextures}
             onSelect={selectPoint}
             onReady={handleEarthReady}
+            onOverlayReady={handleOverlayReady}
           />
         </Suspense>
         <BoundaryLines />

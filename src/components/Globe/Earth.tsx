@@ -13,6 +13,7 @@ type EarthProps = {
   overlayOpacity?: number;
   onSelect: (lat: number, lon: number) => void;
   onReady?: (textureUrl: string) => void;
+  onOverlayReady?: (id: string, textureUrl: string) => void;
 };
 
 type SelectHandlers = {
@@ -214,15 +215,24 @@ function OverlaySphere({
 }
 
 function OverlayLayer({
+  id,
   textureUrl,
   opacity,
   renderOrder,
+  onReady,
 }: {
+  id: string;
   textureUrl: string;
   opacity: number;
   renderOrder: number;
+  onReady?: (id: string, textureUrl: string) => void;
 }) {
   const texture = useGlobeTexture(textureUrl);
+
+  useEffect(() => {
+    onReady?.(id, textureUrl);
+  }, [id, onReady, texture, textureUrl]);
+
   return <OverlaySphere texture={texture} opacity={opacity} renderOrder={renderOrder} />;
 }
 
@@ -251,6 +261,7 @@ export function Earth({
   overlayOpacity = 0.75,
   onSelect,
   onReady,
+  onOverlayReady,
 }: EarthProps) {
   const baseTexture = useGlobeTexture(textureUrl);
   const upgradeTexture = useBackgroundGlobeTexture(upgradeTextureUrl, imageryVisible);
@@ -275,9 +286,11 @@ export function Earth({
       {overlayTextures?.map((overlay, index) => (
         <Suspense key={overlay.id} fallback={null}>
           <OverlayLayer
+            id={overlay.id}
             textureUrl={overlay.url}
             opacity={overlayOpacity}
             renderOrder={index + 1}
+            onReady={onOverlayReady}
           />
         </Suspense>
       ))}

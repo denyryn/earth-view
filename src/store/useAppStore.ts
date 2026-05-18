@@ -46,6 +46,10 @@ type ModalReturnState = {
 };
 
 export type ActivityOverlayKey = "earthquakes" | "volcanoes" | "storms";
+export type OverlayLoadStatus = {
+  state: "loading" | "loaded";
+  url: string;
+};
 
 type AppState = {
   selectedPoint: SelectedPoint | null;
@@ -57,6 +61,7 @@ type AppState = {
   layerId: string;
   imageryVisible: boolean;
   overlayLayerIds: string[];
+  overlayLoadStatuses: Record<string, OverlayLoadStatus>;
   activityOverlays: Record<ActivityOverlayKey, boolean>;
   dateManuallySelected: boolean;
   layerManuallySelected: boolean;
@@ -79,6 +84,7 @@ type AppState = {
   clearOverlayLayers: () => void;
   toggleActivityOverlay: (key: ActivityOverlayKey) => void;
   setImageryZoomDegrees: (degrees: number) => void;
+  setOverlayLoadStatus: (id: string, status: OverlayLoadStatus) => void;
 };
 
 const initialTrueColorImagery = getLatestTrueColorImagery();
@@ -96,6 +102,7 @@ export const useAppStore = create<AppState>((set) => ({
   layerId: initialTrueColorImagery.layerId,
   imageryVisible: true,
   overlayLayerIds: [],
+  overlayLoadStatuses: {},
   activityOverlays: { earthquakes: false, volcanoes: false, storms: false },
   dateManuallySelected: false,
   layerManuallySelected: false,
@@ -176,6 +183,9 @@ export const useAppStore = create<AppState>((set) => ({
       layerId,
       layerManuallySelected: true,
       overlayLayerIds: state.overlayLayerIds.filter((id) => id !== layerId),
+      overlayLoadStatuses: Object.fromEntries(
+        Object.entries(state.overlayLoadStatuses).filter(([id]) => id !== layerId),
+      ),
     })),
   toggleImageryVisible: () =>
     set((state) => ({
@@ -186,12 +196,19 @@ export const useAppStore = create<AppState>((set) => ({
       if (id === state.layerId || state.overlayLayerIds.includes(id)) {
         return state;
       }
-      return { overlayLayerIds: [...state.overlayLayerIds, id] };
+      return {
+        overlayLayerIds: [...state.overlayLayerIds, id],
+      };
     }),
   removeOverlayLayer: (id) =>
-    set((state) => ({
-      overlayLayerIds: state.overlayLayerIds.filter((existing) => existing !== id),
-    })),
+    set((state) => {
+      const { [id]: _removedStatus, ...overlayLoadStatuses } = state.overlayLoadStatuses;
+
+      return {
+        overlayLayerIds: state.overlayLayerIds.filter((existing) => existing !== id),
+        overlayLoadStatuses,
+      };
+    }),
   moveOverlayLayer: (id, direction) =>
     set((state) => {
       const index = state.overlayLayerIds.indexOf(id);
@@ -202,10 +219,25 @@ export const useAppStore = create<AppState>((set) => ({
       [next[index], next[target]] = [next[target], next[index]];
       return { overlayLayerIds: next };
     }),
-  clearOverlayLayers: () => set({ overlayLayerIds: [] }),
+  clearOverlayLayers: () => set({ overlayLayerIds: [], overlayLoadStatuses: {} }),
   toggleActivityOverlay: (key) =>
     set((state) => ({
       activityOverlays: { ...state.activityOverlays, [key]: !state.activityOverlays[key] },
     })),
   setImageryZoomDegrees: (imageryZoomDegrees) => set({ imageryZoomDegrees }),
+  setOverlayLoadStatus: (id, status) =>
+    set((state) => {
+      const existing = state.overlayLoadStatuses[id];
+
+      if (existing?.state === status.state && existing.url === status.url) {
+        return state;
+      }
+
+      return {
+        overlayLoadStatuses: {
+          ...state.overlayLoadStatuses,
+          [id]: status,
+        },
+      };
+    }),
 }));

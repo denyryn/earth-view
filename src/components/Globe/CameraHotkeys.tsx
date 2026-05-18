@@ -1,11 +1,13 @@
 import {
   Activity,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
   Eye,
   EyeOff,
   Flame,
   Layers,
+  LoaderCircle,
   Mountain,
   Wind,
   X,
@@ -40,6 +42,7 @@ export function CameraHotkeys() {
   const layerId = useAppStore((state) => state.layerId);
   const imageryVisible = useAppStore((state) => state.imageryVisible);
   const overlayLayerIds = useAppStore((state) => state.overlayLayerIds);
+  const overlayLoadStatuses = useAppStore((state) => state.overlayLoadStatuses);
   const modalOpen = useAppStore((state) => state.modalOpen);
   const atMaxZoom = useAppStore((state) => state.globeView?.atMaxZoom ?? false);
   const setLayer = useAppStore((state) => state.setLayer);
@@ -61,6 +64,7 @@ export function CameraHotkeys() {
     () =>
       imageryProviders.filter(
         (provider) =>
+          provider.overlayOnly &&
           provider.layerId &&
           provider.id !== layerId &&
           !overlayLayerIds.includes(provider.id),
@@ -206,6 +210,8 @@ export function CameraHotkeys() {
               const provider = getImageryProvider(id);
               const isFirst = index === 0;
               const isLast = index === overlayLayerIds.length - 1;
+              const loadStatus = overlayLoadStatuses[id]?.state ?? "loading";
+              const isLoaded = loadStatus === "loaded";
 
               return (
                 <li
@@ -232,6 +238,21 @@ export function CameraHotkeys() {
                       <ChevronDown className="h-2.5 w-2.5" />
                     </button>
                   </div>
+                  <span
+                    className={`inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border ${
+                      isLoaded
+                        ? "border-primary/35 bg-primary/10 text-primary"
+                        : "border-white/10 bg-background/50 text-muted-foreground"
+                    }`}
+                    title={isLoaded ? `${provider.name} overlay loaded` : `Loading ${provider.name} overlay`}
+                    aria-label={isLoaded ? `${provider.name} overlay loaded` : `Loading ${provider.name} overlay`}
+                  >
+                    {isLoaded ? (
+                      <CheckCircle2 className="h-2.5 w-2.5" />
+                    ) : (
+                      <LoaderCircle className="h-2.5 w-2.5 animate-spin" />
+                    )}
+                  </span>
                   <span className="min-w-0 flex-1 truncate font-medium leading-tight text-foreground">
                     {provider.name}
                   </span>
