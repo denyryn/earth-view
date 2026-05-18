@@ -106,6 +106,23 @@ type RegionalDragStartInput = Pick<
   "pointerId" | "x" | "y" | "originX" | "originY"
 >;
 
+function scalePanForZoom(
+  pan: { x: number; y: number },
+  previousZoomDegrees: number,
+  nextZoomDegrees: number,
+) {
+  if (nextZoomDegrees <= 0 || previousZoomDegrees === nextZoomDegrees) {
+    return pan;
+  }
+
+  const scale = previousZoomDegrees / nextZoomDegrees;
+
+  return {
+    x: pan.x * scale,
+    y: pan.y * scale,
+  };
+}
+
 function bboxForPoint(
   selectedPoint: SelectedPoint,
   imagePaneSize: { width: number; height: number } | null,
@@ -217,6 +234,17 @@ export function useRegionalImagery({
     invalidatePendingImageRequest();
     setRequestNonce((nonce) => nonce + 1);
   }, [invalidatePendingImageRequest]);
+
+  function clearPendingZoomCommit() {
+    if (zoomCommitTimerRef.current === null) {
+      return false;
+    }
+
+    window.clearTimeout(zoomCommitTimerRef.current);
+    zoomCommitTimerRef.current = null;
+
+    return true;
+  }
 
   useEffect(() => {
     if (!modalOpen || !bbox) {
@@ -452,8 +480,14 @@ export function useRegionalImagery({
       return null;
     }
 
-    const baseX = event.clientX - rect.left - rect.width / 2 - regionalPan.x;
-    const baseY = event.clientY - rect.top - rect.height / 2 - regionalPan.y;
+    const activeDragPan = regionalDragStart
+      ? {
+          x: regionalPan.x - regionalDragStart.originX,
+          y: regionalPan.y - regionalDragStart.originY,
+        }
+      : { x: 0, y: 0 };
+    const baseX = event.clientX - rect.left - rect.width / 2 - activeDragPan.x;
+    const baseY = event.clientY - rect.top - rect.height / 2 - activeDragPan.y;
     const lonSpan = previewBbox.maxLon - previewBbox.minLon;
     const latSpan = previewBbox.maxLat - previewBbox.minLat;
 
@@ -511,6 +545,9 @@ export function useRegionalImagery({
     dragInvalidatedRequestRef.current = false;
     dragActiveRef.current = false;
     setManagedUpdateReason("positioning");
+    if (clearPendingZoomCommit()) {
+      setImageryZoomDegrees(previewZoomDegrees);
+    }
     recenterPoint(nextLat, nextLon);
   }
 
@@ -549,12 +586,16 @@ export function useRegionalImagery({
 
   function previewRegionalZoom(nextDegrees: number) {
     invalidatePendingImageRequest();
+    setRegionalPan((currentPan) =>
+      scalePanForZoom(currentPan, previewZoomDegrees, nextDegrees),
+    );
+    setCommittedRegionalPan((currentPan) =>
+      scalePanForZoom(currentPan, previewZoomDegrees, nextDegrees),
+    );
     setPreviewZoomDegrees(nextDegrees);
     setManagedUpdateReason("resolution");
 
-    if (zoomCommitTimerRef.current !== null) {
-      window.clearTimeout(zoomCommitTimerRef.current);
-    }
+    clearPendingZoomCommit();
 
     zoomCommitTimerRef.current = window.setTimeout(() => {
       setImageryZoomDegrees(nextDegrees);
