@@ -320,23 +320,28 @@ export function CameraHotkeys() {
       </div>
     </aside>
     {hoveredOverlay && overlayMenuOpen ? (
-      <div className="pointer-events-none fixed left-1/2 top-1/2 z-20 w-[min(420px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/15 bg-background/94 p-4 text-sm text-foreground shadow-2xl backdrop-blur-md">
+      <div
+        className="pointer-events-none fixed left-1/2 top-1/2 z-20 w-[min(460px,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border border-white/25 p-4 text-sm text-white shadow-2xl ring-1 ring-black"
+        style={{ backgroundColor: "#05070d" }}
+      >
         <div className="mb-2 flex items-start justify-between gap-4">
           <div>
-            <div className="text-base font-semibold leading-tight">{hoveredOverlay.name}</div>
-            <div className="mt-1 text-xs text-muted-foreground">
+            <div className="text-base font-semibold leading-tight text-white">
+              {hoveredOverlay.name}
+            </div>
+            <div className="mt-1 text-xs text-white/70">
               {hoveredOverlay.satellite} · {hoveredOverlay.category} · {hoveredOverlay.resolution}m nominal
             </div>
           </div>
         </div>
-        <p className="text-sm leading-relaxed text-foreground/90">{hoveredOverlay.summary}</p>
-        <div className="mt-3 space-y-2 border-t border-white/10 pt-3 text-xs leading-relaxed text-muted-foreground">
+        <p className="text-sm leading-relaxed text-white/90">{hoveredOverlay.summary}</p>
+        <div className="mt-3 space-y-2 border-t border-white/15 pt-3 text-xs leading-relaxed text-white/75">
           <p>
-            <span className="font-medium text-foreground">Best for: </span>
+            <span className="font-medium text-white">Best for: </span>
             {hoveredOverlay.bestFor}
           </p>
           <p>
-            <span className="font-medium text-foreground">Watch for: </span>
+            <span className="font-medium text-white">Watch for: </span>
             {hoveredOverlay.caveat}
           </p>
         </div>
