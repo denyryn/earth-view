@@ -17,10 +17,25 @@ import { VolcanoMarkers } from "./EventOverlays/VolcanoMarkers";
 import { Starfield } from "./Starfield";
 
 const MIN_GLOBE_DISTANCE = 1.06;
+const MAX_GLOBE_DISTANCE = 6;
 const MAX_ZOOM_DISTANCE = 1.085;
+const MIN_ROTATE_SPEED = 0.012;
+const MAX_ROTATE_SPEED = 0.36;
+const MIN_PAN_SPEED = 0.018;
+const MAX_PAN_SPEED = 0.24;
+const DRAG_SPEED_CURVE = 1.25;
+const MIN_ZOOM_SPEED = 0.075;
+const MAX_ZOOM_SPEED = 0.5;
+const ZOOM_SPEED_CURVE = 1.45;
 const VIEW_REPORT_INTERVAL = 8;
 const INITIAL_GLOBE_TEXTURE_WIDTH = 4096;
 const DETAILED_GLOBE_TEXTURE_WIDTH = 8192;
+
+function zoomProgressForDistance(distance: number) {
+  const progress = (distance - MIN_GLOBE_DISTANCE) / (MAX_GLOBE_DISTANCE - MIN_GLOBE_DISTANCE);
+
+  return Math.min(1, Math.max(0, progress));
+}
 
 function AdaptiveControls() {
   const controlsRef = useRef<OrbitControlsImpl>(null);
@@ -64,11 +79,13 @@ function AdaptiveControls() {
     }
 
     const distance = camera.position.distanceTo(controls.target);
-    const zoomProgress = Math.min(1, Math.max(0, (distance - 1.06) / (6 - 1.06)));
+    const zoomProgress = zoomProgressForDistance(distance);
+    const dragSpeedProgress = Math.pow(zoomProgress, DRAG_SPEED_CURVE);
+    const zoomSpeedProgress = Math.pow(zoomProgress, ZOOM_SPEED_CURVE);
 
-    controls.rotateSpeed = 0.04 + zoomProgress * 0.32;
-    controls.panSpeed = 0.04 + zoomProgress * 0.2;
-    controls.zoomSpeed = 0.24 + zoomProgress * 0.26;
+    controls.rotateSpeed = MIN_ROTATE_SPEED + dragSpeedProgress * (MAX_ROTATE_SPEED - MIN_ROTATE_SPEED);
+    controls.panSpeed = MIN_PAN_SPEED + dragSpeedProgress * (MAX_PAN_SPEED - MIN_PAN_SPEED);
+    controls.zoomSpeed = MIN_ZOOM_SPEED + zoomSpeedProgress * (MAX_ZOOM_SPEED - MIN_ZOOM_SPEED);
 
     frameCount.current += 1;
 
@@ -133,10 +150,10 @@ function AdaptiveControls() {
       enableDamping
       dampingFactor={0.08}
       minDistance={MIN_GLOBE_DISTANCE}
-      maxDistance={6}
-      rotateSpeed={0.24}
-      zoomSpeed={0.38}
-      panSpeed={0.14}
+      maxDistance={MAX_GLOBE_DISTANCE}
+      rotateSpeed={MIN_ROTATE_SPEED}
+      zoomSpeed={MIN_ZOOM_SPEED}
+      panSpeed={MIN_PAN_SPEED}
     />
   );
 }
