@@ -62,7 +62,7 @@ export function CityLabels() {
   return (
     <group>
       {labels.map((city, index) => (
-        <Html key={city.name} center position={city.position}>
+        <Html key={city.name} center position={city.position} zIndexRange={[0, 0]}>
           <span
             ref={(node) => {
               labelRefs.current[index] = node;
