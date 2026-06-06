@@ -664,6 +664,10 @@ export function useRegionalImagery({
   }
 
   function previewRegionalZoom(nextDegrees: number) {
+    if (nextDegrees === previewZoomDegrees) {
+      return;
+    }
+
     invalidatePendingImageRequest();
     setRegionalPan((currentPan) =>
       scalePanForZoom(currentPan, previewZoomDegrees, nextDegrees),
@@ -677,8 +681,14 @@ export function useRegionalImagery({
     clearPendingZoomCommit();
 
     zoomCommitTimerRef.current = window.setTimeout(() => {
-      setImageryZoomDegrees(nextDegrees);
       zoomCommitTimerRef.current = null;
+
+      if (nextDegrees === imageryZoomDegrees) {
+        restartCurrentImageRequest();
+        return;
+      }
+
+      setImageryZoomDegrees(nextDegrees);
     }, 260);
   }
 

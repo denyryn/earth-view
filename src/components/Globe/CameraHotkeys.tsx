@@ -14,7 +14,7 @@ import {
   Wind,
   X,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getImageryProvider, imageryProviders } from "@/providers/registry";
 import { type ActivityOverlayKey, useAppStore } from "@/store/useAppStore";
 
@@ -44,13 +44,16 @@ export function CameraHotkeys() {
   const layerId = useAppStore((state) => state.layerId);
   const imageryVisible = useAppStore((state) => state.imageryVisible);
   const boundaryLinesVisible = useAppStore((state) => state.boundaryLinesVisible);
+  const overlayLayersVisible = useAppStore((state) => state.overlayLayersVisible);
   const overlayLayerIds = useAppStore((state) => state.overlayLayerIds);
   const overlayLoadStatuses = useAppStore((state) => state.overlayLoadStatuses);
   const modalOpen = useAppStore((state) => state.modalOpen);
   const atMaxZoom = useAppStore((state) => state.globeView?.atMaxZoom ?? false);
   const setLayer = useAppStore((state) => state.setLayer);
+  const setGlobeLayer = useAppStore((state) => state.setGlobeLayer);
   const toggleImageryVisible = useAppStore((state) => state.toggleImageryVisible);
   const toggleBoundaryLinesVisible = useAppStore((state) => state.toggleBoundaryLinesVisible);
+  const toggleOverlayLayersVisible = useAppStore((state) => state.toggleOverlayLayersVisible);
   const addOverlayLayer = useAppStore((state) => state.addOverlayLayer);
   const removeOverlayLayer = useAppStore((state) => state.removeOverlayLayer);
   const moveOverlayLayer = useAppStore((state) => state.moveOverlayLayer);
@@ -77,6 +80,17 @@ export function CameraHotkeys() {
   );
   const hoveredOverlay = hoveredOverlayId ? getImageryProvider(hoveredOverlayId) : null;
 
+  const selectGlobeLayer = useCallback((id: string) => {
+    const provider = getImageryProvider(id);
+
+    if (provider.sentinelVariantId) {
+      setLayer(id);
+      return;
+    }
+
+    setGlobeLayer(id);
+  }, [setGlobeLayer, setLayer]);
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (modalOpen || event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) {
@@ -90,12 +104,12 @@ export function CameraHotkeys() {
       }
 
       event.preventDefault();
-      setLayer(visibleProviders[index].id);
+      selectGlobeLayer(visibleProviders[index].id);
     }
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [modalOpen, setLayer, visibleProviders]);
+  }, [modalOpen, selectGlobeLayer, visibleProviders]);
 
   useEffect(() => {
     if (!overlayMenuOpen) {
@@ -167,6 +181,19 @@ export function CameraHotkeys() {
           >
             {boundaryLinesVisible ? <Map className="h-3 w-3" /> : <Grid2x2X className="h-3 w-3" />}
           </button>
+          <button
+            type="button"
+            onClick={toggleOverlayLayersVisible}
+            className={`inline-flex h-5 w-5 items-center justify-center rounded-sm border transition-colors ${
+              overlayLayersVisible
+                ? "border-primary/60 bg-primary/20 text-foreground"
+                : "border-white/10 bg-background/50 text-muted-foreground hover:text-foreground"
+            }`}
+            aria-label={overlayLayersVisible ? "Hide overlays" : "Show overlays"}
+            title={overlayLayersVisible ? "Hide overlays" : "Show overlays"}
+          >
+            {overlayLayersVisible ? <Layers className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+          </button>
         </div>
       </div>
       <div className="space-y-0.5">
@@ -177,7 +204,7 @@ export function CameraHotkeys() {
             <button
               key={provider.id}
               type="button"
-              onClick={() => setLayer(provider.id)}
+              onClick={() => selectGlobeLayer(provider.id)}
               className={`flex w-full items-center gap-2 rounded-md border px-1.5 py-1 text-left text-[11px] transition-colors ${
                 selected
                   ? "border-primary/60 bg-primary/20 text-foreground"

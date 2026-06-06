@@ -61,6 +61,7 @@ type AppState = {
   layerId: string;
   imageryVisible: boolean;
   boundaryLinesVisible: boolean;
+  overlayLayersVisible: boolean;
   overlayLayerIds: string[];
   overlayLoadStatuses: Record<string, OverlayLoadStatus>;
   activityOverlays: Record<ActivityOverlayKey, boolean>;
@@ -78,8 +79,10 @@ type AppState = {
   closeModal: () => void;
   setDate: (date: string) => void;
   setLayer: (id: string) => void;
+  setGlobeLayer: (id: string) => void;
   toggleImageryVisible: () => void;
   toggleBoundaryLinesVisible: () => void;
+  toggleOverlayLayersVisible: () => void;
   addOverlayLayer: (id: string) => void;
   removeOverlayLayer: (id: string) => void;
   moveOverlayLayer: (id: string, direction: "up" | "down") => void;
@@ -104,6 +107,7 @@ export const useAppStore = create<AppState>((set) => ({
   layerId: initialTrueColorImagery.layerId,
   imageryVisible: true,
   boundaryLinesVisible: true,
+  overlayLayersVisible: true,
   overlayLayerIds: [],
   overlayLoadStatuses: {},
   activityOverlays: { earthquakes: false, volcanoes: false, storms: false },
@@ -190,6 +194,15 @@ export const useAppStore = create<AppState>((set) => ({
         Object.entries(state.overlayLoadStatuses).filter(([id]) => id !== layerId),
       ),
     })),
+  setGlobeLayer: (layerId) =>
+    set((state) => ({
+      layerId,
+      layerManuallySelected: false,
+      overlayLayerIds: state.overlayLayerIds.filter((id) => id !== layerId),
+      overlayLoadStatuses: Object.fromEntries(
+        Object.entries(state.overlayLoadStatuses).filter(([id]) => id !== layerId),
+      ),
+    })),
   toggleImageryVisible: () =>
     set((state) => ({
       imageryVisible: !state.imageryVisible,
@@ -197,6 +210,10 @@ export const useAppStore = create<AppState>((set) => ({
   toggleBoundaryLinesVisible: () =>
     set((state) => ({
       boundaryLinesVisible: !state.boundaryLinesVisible,
+    })),
+  toggleOverlayLayersVisible: () =>
+    set((state) => ({
+      overlayLayersVisible: !state.overlayLayersVisible,
     })),
   addOverlayLayer: (id) =>
     set((state) => {

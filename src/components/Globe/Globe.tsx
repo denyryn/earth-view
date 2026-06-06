@@ -15,7 +15,6 @@ import { ActivityHoverPopup } from "./EventOverlays/ActivityHoverPopup";
 import { EarthquakeMarkers } from "./EventOverlays/EarthquakeMarkers";
 import { StormTracks } from "./EventOverlays/StormTracks";
 import { VolcanoMarkers } from "./EventOverlays/VolcanoMarkers";
-import { Starfield } from "./Starfield";
 
 const MIN_GLOBE_DISTANCE = 1.06;
 const MAX_GLOBE_DISTANCE = 6;
@@ -194,6 +193,7 @@ export function Globe() {
   const layerId = useAppStore((state) => state.layerId);
   const imageryVisible = useAppStore((state) => state.imageryVisible);
   const boundaryLinesVisible = useAppStore((state) => state.boundaryLinesVisible);
+  const overlayLayersVisible = useAppStore((state) => state.overlayLayersVisible);
   const overlayLayerIds = useAppStore((state) => state.overlayLayerIds);
   const activityOverlays = useAppStore((state) => state.activityOverlays);
   const overlayLoadStatuses = useAppStore((state) => state.overlayLoadStatuses);
@@ -210,7 +210,8 @@ export function Globe() {
   });
   const overlayTextures = useMemo(
     () =>
-      overlayLayerIds
+      overlayLayersVisible
+        ? overlayLayerIds
         .map((id) => {
           const overlay = getImageryProvider(id);
           if (!overlay.layerId) return null;
@@ -220,8 +221,9 @@ export function Globe() {
             url: buildGlobalGibsTextureUrl(overlay.layerId, overlayDate, { transparent: true }),
           };
         })
-        .filter((entry): entry is { id: string; url: string } => entry !== null),
-    [date, overlayLayerIds],
+        .filter((entry): entry is { id: string; url: string } => entry !== null)
+        : [],
+    [date, overlayLayerIds, overlayLayersVisible],
   );
   const [loadedTextureUrl, setLoadedTextureUrl] = useState<string | null>(null);
   const globeLoading = loadedTextureUrl !== textureUrl && loadedTextureUrl !== upgradeTextureUrl;
@@ -267,7 +269,6 @@ export function Globe() {
         <ambientLight intensity={0.5} />
         <directionalLight position={[4, 2.8, 2.2]} intensity={1.8} />
         <directionalLight position={[-3, -1.8, -3]} intensity={0.2} color="#ffffff" />
-        <Starfield />
         <Suspense fallback={<PlaceholderEarth onSelect={selectPoint} />}>
           <Earth
             imageryVisible={imageryVisible}

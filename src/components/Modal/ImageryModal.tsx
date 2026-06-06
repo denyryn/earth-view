@@ -307,8 +307,8 @@ export function ImageryModal() {
 
   return (
     <Dialog open={modalOpen} onOpenChange={handleOpenChange}>
-      <DialogContent data-testid="imagery-modal">
-        <div className="grid max-h-[92dvh] grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]">
+      <DialogContent className="h-[92dvh] sm:h-[88vh]" data-testid="imagery-modal">
+        <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]">
           <div
             ref={setImagePaneRef}
             className="relative min-h-[360px] cursor-grab select-none overflow-hidden bg-black touch-none active:cursor-grabbing lg:min-h-[680px]"
@@ -421,7 +421,7 @@ export function ImageryModal() {
             )}
           </div>
 
-          <aside className="flex min-h-0 flex-col gap-5 overflow-y-auto border-t border-border bg-card p-5 lg:border-l lg:border-t-0">
+          <aside className="flex min-h-0 flex-col gap-5 overflow-y-auto overscroll-contain border-t border-border bg-card p-5 lg:border-l lg:border-t-0">
             <DialogHeader className="pr-7">
               <DialogTitle className="flex items-center gap-2">
                 <MapPinned className="h-5 w-5 text-primary" />

@@ -210,7 +210,7 @@ export const imageryProviders: ImageryProvider[] = [
 
 export const modalImageryProviders = [
   ...imageryProviders.filter((provider) => provider.sentinelVariantId),
-  ...imageryProviders.filter((provider) => !provider.sentinelVariantId),
+  ...imageryProviders.filter((provider) => !provider.sentinelVariantId && !provider.overlayOnly),
 ];
 
 const imageryProviderById = new Map(imageryProviders.map((provider) => [provider.id, provider]));
