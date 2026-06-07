@@ -9,7 +9,6 @@ import {
   useState,
 } from "react";
 import {
-  bboxFromPoint,
   clamp,
   degreesToZoomPercent,
   normalizeLongitude,
@@ -46,6 +45,10 @@ type SentinelSceneResponse = {
 const REGIONAL_SCENES_LIMIT = 30;
 const SENTINEL_INTERACTION_LOAD_DELAY_MS = 500;
 const MAX_REGIONAL_IMAGE_CACHE_ENTRIES = 12;
+const DEFAULT_PANE_SIZE = { width: 1024, height: 1024 };
+const GIBS_REGIONAL_IMAGE_MAX_SIZE = 1400;
+const SENTINEL_REGIONAL_IMAGE_MAX_SIZE = 1024;
+const REGIONAL_IMAGE_MIN_LONG_EDGE = 768;
 
 function imageryErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Imagery unavailable for this selection.";
@@ -124,6 +127,43 @@ function scalePanForZoom(
   };
 }
 
+function scalePanForZoomAtPoint(
+  pan: { x: number; y: number },
+  previousZoomDegrees: number,
+  nextZoomDegrees: number,
+  anchor: { x: number; y: number },
+) {
+  if (nextZoomDegrees <= 0 || previousZoomDegrees === nextZoomDegrees) {
+    return pan;
+  }
+
+  const scale = previousZoomDegrees / nextZoomDegrees;
+
+  return {
+    x: pan.x * scale + anchor.x * (1 - scale),
+    y: pan.y * scale + anchor.y * (1 - scale),
+  };
+}
+
+function imageRequestSizeForPane(
+  imagePaneSize: { width: number; height: number } | null,
+  maxSize: number,
+) {
+  const paneSize = imagePaneSize ?? DEFAULT_PANE_SIZE;
+  const paneWidth = Math.max(1, paneSize.width);
+  const paneHeight = Math.max(1, paneSize.height);
+  const scale = Math.min(
+    maxSize / Math.max(paneWidth, paneHeight),
+    Math.max(REGIONAL_IMAGE_MIN_LONG_EDGE, Math.max(paneWidth, paneHeight)) /
+      Math.max(paneWidth, paneHeight),
+  );
+
+  return {
+    width: Math.max(256, Math.round(paneWidth * scale)),
+    height: Math.max(256, Math.round(paneHeight * scale)),
+  };
+}
+
 function bboxForPoint(
   selectedPoint: SelectedPoint,
   imagePaneSize: { width: number; height: number } | null,
@@ -148,7 +188,15 @@ function bboxForPoint(
     );
   }
 
-  return bboxFromPoint(selectedPoint.lat, selectedPoint.lon, zoomDegrees);
+  const paneSize = imagePaneSize ?? DEFAULT_PANE_SIZE;
+  const paneAspect = Math.max(1, paneSize.width) / Math.max(1, paneSize.height);
+
+  return bboxFromSpans(
+    selectedPoint.lat,
+    selectedPoint.lon,
+    paneAspect >= 1 ? zoomDegrees / paneAspect : zoomDegrees,
+    paneAspect >= 1 ? zoomDegrees : zoomDegrees * paneAspect,
+  );
 }
 
 export function useRegionalImagery({
@@ -207,14 +255,18 @@ export function useRegionalImagery({
       return null;
     }
 
-    return bboxFromPoint(selectedPoint.lat, selectedPoint.lon, imageryZoomDegrees);
-  }, [imageryZoomDegrees, selectedPoint]);
-  const regionalImageWidth = imagePaneSize
-    ? Math.min(1400, Math.max(768, Math.round(imagePaneSize.width)))
-    : 1024;
-  const regionalImageHeight = imagePaneSize
-    ? Math.min(1400, Math.max(768, Math.round(imagePaneSize.height)))
-    : 1024;
+    return bboxForPoint(
+      { lat: selectedPoint.lat, lon: selectedPoint.lon },
+      imagePaneSize,
+      imageryZoomDegrees,
+    );
+  }, [imagePaneSize, imageryZoomDegrees, selectedPoint]);
+  const regionalImageSize = imageRequestSizeForPane(
+    imagePaneSize,
+    provider.sentinelVariantId ? SENTINEL_REGIONAL_IMAGE_MAX_SIZE : GIBS_REGIONAL_IMAGE_MAX_SIZE,
+  );
+  const regionalImageWidth = regionalImageSize.width;
+  const regionalImageHeight = regionalImageSize.height;
   const imagePreviewScale = loadedImageZoomDegrees / previewZoomDegrees;
 
   const setManagedImage = useCallback((image: CachedRegionalImage | null) => {
@@ -692,13 +744,89 @@ export function useRegionalImagery({
     }, 260);
   }
 
+  function previewRegionalZoomAtCursor(
+    nextDegrees: number,
+    event: WheelEvent<HTMLElement>,
+  ) {
+    if (!selectedPoint || !previewBbox || nextDegrees === previewZoomDegrees) {
+      previewRegionalZoom(nextDegrees);
+      return;
+    }
+
+    const rect = imagePaneRef.current?.getBoundingClientRect();
+
+    if (!rect) {
+      previewRegionalZoom(nextDegrees);
+      return;
+    }
+
+    const activeDragPan = regionalDragStart
+      ? {
+          x: regionalPan.x - regionalDragStart.originX,
+          y: regionalPan.y - regionalDragStart.originY,
+        }
+      : { x: 0, y: 0 };
+    const anchor = {
+      x: event.clientX - rect.left - rect.width / 2 - activeDragPan.x,
+      y: event.clientY - rect.top - rect.height / 2 - activeDragPan.y,
+    };
+    const currentLatSpan = previewBbox.maxLat - previewBbox.minLat;
+    const currentLonSpan = previewBbox.maxLon - previewBbox.minLon;
+    const anchorLat = clamp(
+      selectedPoint.lat - (anchor.y / rect.height) * currentLatSpan,
+      -85,
+      85,
+    );
+    const anchorLon = normalizeLongitude(
+      selectedPoint.lon + (anchor.x / rect.width) * currentLonSpan,
+    );
+    const nextBbox = bboxForPoint(selectedPoint, imagePaneSize, nextDegrees);
+    const nextLatSpan = nextBbox.maxLat - nextBbox.minLat;
+    const nextLonSpan = nextBbox.maxLon - nextBbox.minLon;
+    const nextCenter = {
+      lat: clamp(anchorLat + (anchor.y / rect.height) * nextLatSpan, -85, 85),
+      lon: normalizeLongitude(anchorLon - (anchor.x / rect.width) * nextLonSpan),
+    };
+
+    invalidatePendingImageRequest();
+    setRegionalPan((currentPan) =>
+      scalePanForZoomAtPoint(currentPan, previewZoomDegrees, nextDegrees, anchor),
+    );
+    setCommittedRegionalPan((currentPan) =>
+      scalePanForZoomAtPoint(currentPan, previewZoomDegrees, nextDegrees, anchor),
+    );
+    setPreviewZoomDegrees(nextDegrees);
+    setManagedUpdateReason("resolution");
+
+    clearPendingZoomCommit();
+    recenterPoint(nextCenter.lat, nextCenter.lon);
+
+    zoomCommitTimerRef.current = window.setTimeout(() => {
+      zoomCommitTimerRef.current = null;
+
+      if (nextDegrees === imageryZoomDegrees) {
+        restartCurrentImageRequest();
+        return;
+      }
+
+      setImageryZoomDegrees(nextDegrees);
+    }, 260);
+  }
+
   function zoomRegionalImage(event: WheelEvent<HTMLElement>) {
     event.preventDefault();
 
     const currentPercent = degreesToZoomPercent(previewZoomDegrees);
     const nextPercent = clamp(currentPercent + (event.deltaY > 0 ? -1 : 1), 0, 100);
 
-    previewRegionalZoom(zoomPercentToDegrees(nextPercent));
+    const nextDegrees = zoomPercentToDegrees(nextPercent);
+
+    if (provider.sentinelVariantId) {
+      previewRegionalZoomAtCursor(nextDegrees, event);
+      return;
+    }
+
+    previewRegionalZoom(nextDegrees);
   }
 
   return {

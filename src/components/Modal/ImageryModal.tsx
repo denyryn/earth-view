@@ -307,7 +307,10 @@ export function ImageryModal() {
 
   return (
     <Dialog open={modalOpen} onOpenChange={handleOpenChange}>
-      <DialogContent className="h-[92dvh] sm:h-[88vh]" data-testid="imagery-modal">
+      <DialogContent
+        className="h-[92dvh] w-[calc(100vw-8dvh)] sm:h-[88vh] sm:w-[calc(100vw-12vh)]"
+        data-testid="imagery-modal"
+      >
         <div className="grid h-full min-h-0 grid-cols-1 overflow-hidden lg:grid-cols-[minmax(0,1fr)_320px]">
           <div
             ref={setImagePaneRef}
