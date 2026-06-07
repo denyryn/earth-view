@@ -162,8 +162,9 @@ function validateRequest(input: SentinelRequest) {
     date: input.date,
     sceneDateTime: input.sceneDateTime,
     variantId: input.variantId,
-    width: Math.min(1024, Math.max(256, Math.round(input.width ?? 1024))),
-    height: Math.min(1024, Math.max(256, Math.round(input.height ?? 1024))),
+    // 2500 px is the Sentinel Hub Process API per-request edge limit.
+    width: Math.min(2500, Math.max(256, Math.round(input.width ?? 1024))),
+    height: Math.min(2500, Math.max(256, Math.round(input.height ?? 1024))),
   };
 }
 

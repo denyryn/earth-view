@@ -48,8 +48,13 @@ const SENTINEL_INTERACTION_LOAD_DELAY_MS = 500;
 const MAX_REGIONAL_IMAGE_CACHE_ENTRIES = 12;
 const DEFAULT_PANE_SIZE = { width: 1024, height: 1024 };
 const GIBS_REGIONAL_IMAGE_MAX_SIZE = 1400;
-const SENTINEL_REGIONAL_IMAGE_MAX_SIZE = 1024;
 const REGIONAL_IMAGE_MIN_LONG_EDGE = 768;
+// Sentinel renders at full height with the width following the modal aspect
+// ratio, so a wide modal gets a correspondingly wide (sharper) image instead of
+// having its long edge capped. 2500 px is the Sentinel Hub Process API
+// per-request edge limit.
+const SENTINEL_REGIONAL_IMAGE_HEIGHT = 1024;
+const SENTINEL_PROCESS_MAX_EDGE = 2500;
 
 function imageryErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : "Imagery unavailable for this selection.";
@@ -154,6 +159,63 @@ function imageRequestSizeForPane(
   };
 }
 
+function sentinelImageRequestSize(
+  imagePaneSize: { width: number; height: number } | null,
+  bbox: BoundingBox | null,
+  nativeResolutionMeters: number,
+) {
+  const paneSize = imagePaneSize ?? DEFAULT_PANE_SIZE;
+  const paneWidth = Math.max(1, paneSize.width);
+  const paneHeight = Math.max(1, paneSize.height);
+
+  // Render at full height and let the width follow the modal's aspect ratio, so
+  // a wide modal gets a wider (sharper) image rather than capping the long edge.
+  // The aspect always matches the pane (and therefore the bbox), so object-fill
+  // never distorts it.
+  let width = (paneWidth / paneHeight) * SENTINEL_REGIONAL_IMAGE_HEIGHT;
+  let height = SENTINEL_REGIONAL_IMAGE_HEIGHT;
+
+  // Never request finer than the sensor's native ground resolution. Asking for
+  // more pixels than the bbox holds in native data just makes Sentinel Hub
+  // upsample (interpolate) -- extra processing cost, zero real detail. Capping
+  // at the native pixel count keeps every request honest native imagery.
+  if (bbox && nativeResolutionMeters > 0) {
+    const centerLat = (bbox.minLat + bbox.maxLat) / 2;
+    const groundWidthMeters =
+      Math.max(0, bbox.maxLon - bbox.minLon) *
+      111320 *
+      Math.cos((centerLat * Math.PI) / 180);
+    const nativeWidth = groundWidthMeters / nativeResolutionMeters;
+
+    if (nativeWidth > 0 && width > nativeWidth) {
+      const scale = nativeWidth / width;
+      width *= scale;
+      height *= scale;
+    }
+  }
+
+  // Stay within the Sentinel Hub Process API per-request edge limit.
+  const longestEdge = Math.max(width, height);
+  if (longestEdge > SENTINEL_PROCESS_MAX_EDGE) {
+    const downscale = SENTINEL_PROCESS_MAX_EDGE / longestEdge;
+    width *= downscale;
+    height *= downscale;
+  }
+
+  // Keep a sane minimum without breaking the aspect ratio.
+  const smallestEdge = Math.min(width, height);
+  if (smallestEdge < 256) {
+    const upscale = 256 / smallestEdge;
+    width *= upscale;
+    height *= upscale;
+  }
+
+  return {
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
 function bboxForPoint(
   selectedPoint: SelectedPoint,
   imagePaneSize: { width: number; height: number } | null,
@@ -165,9 +227,9 @@ function bboxForPoint(
   // full bbox stretched across the pane. If the bbox shape diverges from the
   // pane shape, object-fill squashes the image (stretch/tilt) and the preview
   // transform lands on different ground than the freshly loaded image (jump).
-  //
-  // imageryView only seeds the opening zoom level (via selectPoint setting
-  // imageryZoomDegrees); it must not influence the bbox shape here.
+  // So the shape is always derived from the pane aspect, and zoomDegrees is the
+  // lon span for wide panes. The opening zoom level is decided once in
+  // selectPoint (imageryZoomDegrees); imageryView never reshapes the bbox here.
   const paneSize = imagePaneSize ?? DEFAULT_PANE_SIZE;
   const paneAspect = Math.max(1, paneSize.width) / Math.max(1, paneSize.height);
 
@@ -283,10 +345,9 @@ export function useRegionalImagery({
       imageryZoomDegrees,
     );
   }, [imagePaneSize, imageryZoomDegrees, selectedPoint]);
-  const regionalImageSize = imageRequestSizeForPane(
-    imagePaneSize,
-    provider.sentinelVariantId ? SENTINEL_REGIONAL_IMAGE_MAX_SIZE : GIBS_REGIONAL_IMAGE_MAX_SIZE,
-  );
+  const regionalImageSize = provider.sentinelVariantId
+    ? sentinelImageRequestSize(imagePaneSize, bbox, provider.resolution)
+    : imageRequestSizeForPane(imagePaneSize, GIBS_REGIONAL_IMAGE_MAX_SIZE);
   const regionalImageWidth = regionalImageSize.width;
   const regionalImageHeight = regionalImageSize.height;
   const activePreviewView = pendingZoomViewRef.current ?? (

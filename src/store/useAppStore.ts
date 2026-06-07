@@ -106,6 +106,11 @@ const defaultModalLayerId =
   modalImageryProviders.find((provider) => provider.sentinelVariantId)?.id ??
   initialTrueColorImagery.layerId;
 
+// Shift-clicking from the detail view opens the modal at this consistent
+// regional framing centered on the click, rather than inheriting the (often
+// very wide) detail-pass span.
+const REGIONAL_OPEN_WIDTH_KM = 150;
+
 export const useAppStore = create<AppState>((set) => ({
   selectedPoint: null,
   globeView: null,
@@ -128,6 +133,13 @@ export const useAppStore = create<AppState>((set) => ({
     set((state) => {
       const latestTrueColorImagery = getLatestTrueColorImagery();
       const zoomDegrees = typeof zoom === "number" ? zoom : zoom?.lonSpan;
+      // Latitude-aware so the opening framing is a true ~150 km wide regardless
+      // of where on the globe the click lands.
+      const regionalOpenZoom = clamp(
+        REGIONAL_OPEN_WIDTH_KM / (111 * Math.max(Math.cos((lat * Math.PI) / 180), 0.05)),
+        IMAGERY_ZOOM_MIN_DEGREES,
+        IMAGERY_ZOOM_MAX_DEGREES,
+      );
 
       return {
         selectedPoint: { lat, lon, imageryView: typeof zoom === "object" ? zoom : undefined },
@@ -144,11 +156,13 @@ export const useAppStore = create<AppState>((set) => ({
         date: state.dateManuallySelected ? state.date : latestTrueColorImagery.date,
         layerId: state.layerManuallySelected ? state.layerId : defaultModalLayerId,
         imageryZoomDegrees:
-          zoomDegrees === undefined
-            ? state.globeView?.atMaxZoom
-              ? clamp(state.globeView.lonSpan, IMAGERY_ZOOM_MIN_DEGREES, IMAGERY_ZOOM_MAX_DEGREES)
-              : state.imageryZoomDegrees
-            : clamp(zoomDegrees, IMAGERY_ZOOM_MIN_DEGREES, IMAGERY_ZOOM_MAX_DEGREES),
+          typeof zoom === "object"
+            ? regionalOpenZoom
+            : zoomDegrees === undefined
+              ? state.globeView?.atMaxZoom
+                ? clamp(state.globeView.lonSpan, IMAGERY_ZOOM_MIN_DEGREES, IMAGERY_ZOOM_MAX_DEGREES)
+                : state.imageryZoomDegrees
+              : clamp(zoomDegrees, IMAGERY_ZOOM_MIN_DEGREES, IMAGERY_ZOOM_MAX_DEGREES),
       };
     }),
   recenterPoint: (lat, lon) =>
