@@ -1,5 +1,5 @@
 import { Download, LoaderCircle, Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -41,6 +41,19 @@ function formatFrameDate(value: string) {
   return formatLongDate(value);
 }
 
+function isTypingTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return (
+    target.tagName === "INPUT" ||
+    target.tagName === "TEXTAREA" ||
+    target.tagName === "SELECT" ||
+    target.isContentEditable
+  );
+}
+
 export function TimeLapseModal({
   open,
   onOpenChange,
@@ -64,6 +77,14 @@ export function TimeLapseModal({
       ? `${loadingProgress.loaded}/${loadingProgress.total}`
       : null;
 
+  const step = useCallback((delta: number) => {
+    if (frameCount === 0) {
+      return;
+    }
+
+    setFrameIndex((index) => (index + delta + frameCount) % frameCount);
+  }, [frameCount]);
+
   useEffect(() => {
     if (!open) {
       return;
@@ -85,13 +106,27 @@ export function TimeLapseModal({
     return () => window.clearInterval(timer);
   }, [frameCount, frameIntervalMs, open, playbackReady, playing]);
 
-  function step(delta: number) {
-    if (frameCount === 0) {
+  useEffect(() => {
+    if (!open || playing || frameCount === 0) {
       return;
     }
 
-    setFrameIndex((index) => (index + delta + frameCount) % frameCount);
-  }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.metaKey || event.ctrlKey || event.altKey || isTypingTarget(event.target)) {
+        return;
+      }
+
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") {
+        return;
+      }
+
+      event.preventDefault();
+      step(event.key === "ArrowLeft" ? -1 : 1);
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [frameCount, open, playing, step]);
 
   async function downloadSequence() {
     if (frameCount === 0 || exportingGif) {
@@ -174,14 +209,16 @@ export function TimeLapseModal({
                 variant="outline"
                 onClick={() => void downloadSequence()}
                 disabled={loading || exportingGif || frameCount === 0}
-                className="w-full"
+                className="w-full min-w-0 justify-start overflow-hidden px-3 text-xs"
               >
                 {exportingGif ? (
                   <LoaderCircle className="h-4 w-4 animate-spin" />
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
-                {exportingGif ? "Building GIF" : "Download sequence GIF"}
+                <span className="min-w-0 truncate">
+                  {exportingGif ? "Building GIF" : "Download sequence GIF"}
+                </span>
               </Button>
             )}
 
