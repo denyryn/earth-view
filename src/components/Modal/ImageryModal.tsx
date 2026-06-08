@@ -1,5 +1,5 @@
 import { Bot, Film, LoaderCircle, MapPinned, Satellite } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -44,6 +44,10 @@ import { TimeLapseModal } from "./TimeLapseModal";
 
 const ASK_VIEW_VISIBLE = false;
 const SCENE_FOOTPRINT_STROKE = "#34d399";
+// Quick crossfade when a freshly loaded Sentinel image replaces the previous
+// one, masking the slight handoff shift. The outgoing layer is held a little
+// longer than the fade so the incoming image is fully opaque before removal.
+const SENTINEL_CROSSFADE_HOLD_MS = 300;
 
 function viewSignature(context: AskViewContext | null, imageUrl: string | null) {
   if (!context || !imageUrl) {
@@ -187,6 +191,9 @@ export function ImageryModal() {
   const [askProvider, setAskProvider] = useState<AskProvider>("openai");
   const [askPrompt, setAskPrompt] = useState("");
   const [hoveredSceneDateTime, setHoveredSceneDateTime] = useState<string | null>(null);
+  const [imageFadeOutLayer, setImageFadeOutLayer] = useState<{ url: string; transform: string } | null>(
+    null,
+  );
   const provider = getImageryProvider(layerId);
   const selectedLon = selectedPoint?.lon;
   const isRegionalSentinel = Boolean(provider.sentinelVariantId);
@@ -261,6 +268,44 @@ export function ImageryModal() {
       document.body.classList.remove("map-dragging-modal");
     };
   }, [regionalImagery.regionalDragStart]);
+
+  const liveImageTransform = `translate(${regionalImagery.regionalPan.x}px, ${regionalImagery.regionalPan.y}px) scale(${regionalImagery.imagePreviewScaleX}, ${regionalImagery.imagePreviewScaleY})`;
+  const liveImageTransformRef = useRef(liveImageTransform);
+  const previousImageUrlRef = useRef(regionalImagery.imageUrl);
+
+  // Capture the outgoing image as a frozen back layer so the incoming image can
+  // crossfade over it. Reads liveImageTransformRef *before* the effect below
+  // updates it, so the snapshot keeps the transform the old image was showing.
+  useEffect(() => {
+    const nextUrl = regionalImagery.imageUrl;
+
+    if (nextUrl === previousImageUrlRef.current) {
+      return;
+    }
+
+    const previousUrl = previousImageUrlRef.current;
+    previousImageUrlRef.current = nextUrl;
+
+    // Only crossfade Sentinel image-to-image swaps -- not the initial load, a
+    // clear, or non-Sentinel providers.
+    if (!isRegionalSentinel || !previousUrl || !nextUrl) {
+      setImageFadeOutLayer(null);
+      return;
+    }
+
+    const layer = { url: previousUrl, transform: liveImageTransformRef.current };
+    setImageFadeOutLayer(layer);
+
+    const timer = window.setTimeout(() => {
+      setImageFadeOutLayer((current) => (current === layer ? null : current));
+    }, SENTINEL_CROSSFADE_HOLD_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [isRegionalSentinel, regionalImagery.imageUrl]);
+
+  useEffect(() => {
+    liveImageTransformRef.current = liveImageTransform;
+  });
 
   const coordinates = selectedPoint
     ? formatCoordinates(selectedPoint.lat, selectedPoint.lon)
@@ -368,6 +413,20 @@ export function ImageryModal() {
               regionalImagery.cancelRegionalDrag();
             }}
           >
+            {imageFadeOutLayer ? (
+              <img
+                key={imageFadeOutLayer.url}
+                src={imageFadeOutLayer.url}
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+                className="pointer-events-none absolute inset-0 h-full w-full select-none object-fill"
+                style={{
+                  transform: imageFadeOutLayer.transform,
+                  transformOrigin: "center",
+                }}
+              />
+            ) : null}
             {regionalImagery.imageUrl ? (
               <img
                 key={regionalImagery.imageUrl}
@@ -375,9 +434,11 @@ export function ImageryModal() {
                 alt=""
                 data-testid="gibs-image"
                 draggable={false}
-                className="pointer-events-none h-full w-full select-none object-fill"
+                className={`pointer-events-none absolute inset-0 h-full w-full select-none object-fill${
+                  isRegionalSentinel ? " animate-in fade-in-0 duration-200" : ""
+                }`}
                 style={{
-                  transform: `translate(${regionalImagery.regionalPan.x}px, ${regionalImagery.regionalPan.y}px) scale(${regionalImagery.imagePreviewScaleX}, ${regionalImagery.imagePreviewScaleY})`,
+                  transform: liveImageTransform,
                   transformOrigin: "center",
                   transition:
                     regionalImagery.regionalDragStart || regionalImagery.imageLoading
