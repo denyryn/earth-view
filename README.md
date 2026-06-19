@@ -1,163 +1,39 @@
 # Earth View
 
-Earth View is an interactive satellite-imagery exploration app built with React, Vite, Three.js, Tailwind CSS, and Zustand. It has two main working surfaces:
+Earth View is an open-source satellite imagery explorer built with React, Vite, Three.js, Tailwind CSS, and Zustand. It starts with a 3D NASA GIBS globe, lets you zoom into a detailed regional pass, and opens a modal workspace for higher-resolution inspection, Sentinel imagery, time lapses, Google Maps handoff, and optional AI-assisted image analysis.
 
-- A full-screen 3D globe for broad exploration with NASA GIBS global imagery, overlays, labels, and activity markers.
-- A regional modal workspace for closer inspection with pan/zoom, date and layer controls, Copernicus Sentinel imagery, scene metadata, time lapses, and optional AI analysis plumbing.
+This README is focused on getting a new copy running from scratch. For deeper architecture notes and feature details, see [README-extended.md](README-extended.md).
 
-The usual flow is: explore on the globe, zoom into the detailed globe pass, then shift-click or right-click a point to open the regional modal.
+## What Works Without API Keys
 
-## Current Feature Set
+You can run the app immediately with no credentials. The no-key mode includes:
 
-- Interactive Three.js Earth with NASA GIBS WMS imagery wrapped onto a sphere.
-- Daily MODIS and VIIRS true-color and false-color base layers.
-- Stacked NASA GIBS analytic overlays for aerosols, cloud-top temperature, precipitable water, sea surface temperature, chlorophyll, snow, sea ice, and active fires.
-- Toggleable country borders, admin-1 boundaries, graticule lines, and tiered city labels.
-- Optional activity overlays for recent USGS earthquakes and open NASA EONET volcano and severe-storm events.
-- Max-zoom detailed globe pass with a regional 2D raster, aligned GIBS overlay images, boundary overlay, cursor-anchored in-pass zoom, and globe-backdrop visual sync.
-- Regional modal view with drag pan, cursor zoom, date controls, layer switching, imagery info, Sentinel scene metadata, and a Google Maps link for the selected coordinate.
-- GIBS 7-day and 30-day regional time lapses.
-- Sentinel-2 and Sentinel-1 regional imagery, scene searches, 7-mosaic and 30-mosaic time lapses, five-year sampled comparisons, and GIF export for Sentinel sequences.
-- Server and client plumbing for "Ask about this view" AI chat, currently hidden behind `ASK_VIEW_VISIBLE = false` in `src/components/Modal/ImageryModal.tsx`.
+- NASA GIBS global globe imagery
+- MODIS and VIIRS base layers
+- GIBS analytic overlays
+- borders, graticule, city labels, and activity overlays
+- detailed max-zoom regional GIBS imagery
+- modal pan/zoom, date/layer controls, GIBS time lapses, and Google Maps links
 
-## Main Views
+Optional credentials unlock:
 
-### Globe View
+- Copernicus Sentinel-2 and Sentinel-1 regional imagery, scene lists, Sentinel time lapses, and GIF export
+- Ask AI chat in the modal through OpenAI and/or Anthropic
 
-The globe is the default surface. It uses NASA GIBS global WMS frames as sphere textures and reports the visible center, spans, distance, and max-zoom state back to the shared Zustand store.
+## Requirements
 
-Users can:
+- Node.js 18 or newer
+- npm
+- A modern browser with WebGL support
 
-- Drag to orbit Earth.
-- Scroll or pinch to zoom, with Shift+scroll applying a stronger zoom step.
-- Switch globe-capable base imagery from the floating imagery panel or number keys.
-- Hide or show base imagery, boundary context, and the selected overlay stack.
-- Add, reorder, remove, clear, or temporarily hide GIBS analytic overlays.
-- Hover overlay choices to read their summary, best-use notes, caveats, and nominal resolution.
-- Toggle earthquake, volcano, and storm activity overlays.
-- Hover activity markers to inspect feed metadata.
-- Enter a max-zoom detailed imagery pass when the camera gets close enough.
-- Shift-click or right-click the globe or detailed pass to open the modal.
+## Quick Start
 
-At max zoom, `MaxZoomImagery.tsx` overlays a regional 2D image for the current visible globe viewport. The initial zoomed-out detailed state preserves the globe drag behavior that feels like panning across the wrapped Earth. Once the user scrolls into the detailed pass, the component owns a local center/span zoom state similar to the modal: wheel ticks apply cursor-anchored preview transforms, commits are debounced, and the sharper regional image crossfades in.
+Clone the repo:
 
-The globe backdrop follows this detailed view through a detail-only store request, `globeDetailViewRequest`. `Globe.tsx` handles that request by moving the camera to the requested detail center and matching the requested lat/lon span as closely as the sphere camera allows. This keeps exposed globe edges visually lined up without letting the globe feed state back into the detailed overlay. The detailed image is fully opaque during in-pass zoom so unavoidable flat-map-vs-sphere projection differences do not bleed through the image.
-
-The detailed pass is currently capped at `DETAILED_VIEW_MIN_LON_SPAN = 5.59263`. A small banner reminds users that Shift-click opens higher-resolution regional imagery in the modal. Zooming back out to the entry span hands the wheel back to normal globe zoom. The detailed pass also renders selected GIBS overlays as aligned regional WMS images and draws NASA GIBS `Reference_Features` boundaries when boundary lines are enabled.
-
-Sentinel layers are regional-only providers. They can be selected for the modal and detailed regional workflow, but they are not wrapped as true globe textures. When a Sentinel provider is selected outside the regional renderer, the globe keeps a default global VIIRS true-color base while the modal renders the Sentinel layer through the server/API flow.
-
-### Modal View
-
-The modal is the detailed inspection workspace. It opens from a selected coordinate and focuses on a bounded regional image rather than the whole planet.
-
-Users can:
-
-- Drag the regional image to pan.
-- Scroll to cursor-zoom the regional image.
-- Shift-click inside the image to recenter the selected point.
-- Change the active date.
-- Switch between Sentinel, MODIS, VIIRS, and night-lights base imagery.
-- Open the imagery info dialog for layer purpose, resolution, caveats, and best-use notes.
-- Open Google Maps to the precise selected latitude and longitude.
-- Build GIBS daily time lapses and Sentinel mosaic time lapses.
-- Export Sentinel time-lapse sequences as animated GIFs.
-
-The modal image size is shaped by the modal pane. Live modal imagery intentionally uses a bbox that matches the current pane aspect ratio, so the visible image fills the available viewing area. While the user pans or zooms, preview movement is immediate and a centered top status badge reports whether the app is updating positioning or resolution.
-
-When the modal opens, the app stores the previous globe date, layer, manual-selection flags, and overlay stack. Closing the modal restores that prior globe state so regional inspection does not permanently disturb the broader globe context.
-
-For Sentinel layers, the modal searches contributing scenes near the selected date. The sidebar lists acquisition times and Sentinel-2 cloud-cover values where available. Hovering or focusing a listed Sentinel scene can highlight that scene's footprint over the rendered mosaic when geometry is available.
-
-### Time Lapses
-
-Time-lapse imagery is intentionally separated from live modal imagery sizing. Live modal imagery follows the modal pane aspect ratio; time-lapse frames request square imagery so playback does not look stretched or squeezed.
-
-For GIBS layers, the time-lapse hook builds a square bbox centered on the current modal view and requests 1024x1024 WMS frames for recent dates.
-
-For Sentinel layers, the same square bbox is used for scene search, rendering, and cache keys. Sentinel time lapses render 1024x1024 Process API frames. This keeps 7-mosaic, 30-mosaic, and five-year sampled comparisons visually consistent while leaving the live Sentinel modal view free to remain responsive to the window size.
-
-## Data Sources
-
-### NASA GIBS
-
-Most base imagery and analytic overlays come from NASA GIBS WMS.
-
-Base-capable GIBS providers:
-
-- MODIS Terra true color
-- MODIS Aqua true color
-- VIIRS SNPP true color
-- VIIRS NOAA-20 true color
-- VIIRS SNPP SWIR false color
-- VIIRS SNPP cloud/snow false color
-- VIIRS NOAA-20 SWIR false color
-- VIIRS Black Marble night lights
-
-Overlay-only GIBS providers:
-
-- MODIS aerosol optical depth
-- MODIS cloud top temperature
-- AMSR2 precipitable water
-- GHRSST sea surface temperature
-- MODIS chlorophyll-a
-- MODIS snow cover
-- AMSR2 sea ice concentration
-- VIIRS active fires
-- MODIS active fires
-
-The app defaults to the latest likely complete VIIRS NOAA-20 true-color day. `src/lib/dates.ts` applies a small UTC lag so the app avoids requesting incomplete current-day true-color imagery.
-
-The globe first requests a 4096-pixel-wide global base texture, then upgrades to an 8192-pixel-wide texture when that larger frame loads. Analytic overlays on the 3D globe use transparent global GIBS textures; the max-zoom detailed pass requests separate regional overlay images for the current detail view.
-
-Some products are pinned with `fixedDate` in `src/providers/registry.ts` when the public GIBS archive does not currently extend to today.
-
-### Copernicus Sentinel
-
-Regional Sentinel layers use Copernicus Data Space / Sentinel Hub APIs through server-side handlers:
-
-- Sentinel-2 True Color
-- Sentinel-2 False Color IR
-- Sentinel-2 SWIR
-- Sentinel-1 Radar
-
-Sentinel requests require credentials. Without credentials, NASA GIBS globe and regional views still work, but Sentinel image rendering and scene searches return a configuration error.
-
-Sentinel variants live in `src/lib/sentinelVariants.ts`. Each variant defines its collection, nominal resolution, request window, metadata, and evalscript. The server layer handles access tokens, Process API image requests, Catalog API scene searches, Sentinel-2 cloud filtering, and scene de-duplication by minute.
-
-### Event And Boundary Context
-
-The browser fetches supporting context directly:
-
-- Natural Earth country and admin-1 boundary GeoJSON, with fallback URLs.
-- USGS all-day earthquake GeoJSON, filtered to magnitude 2.5 and above.
-- NASA EONET open volcano events.
-- NASA EONET open severe-storm events, rendered as tracks when point history is available.
-
-If a feed fails, the corresponding overlay simply renders no markers. Earthquake markers retain magnitude, depth, place, event time, update time, status, alert, and USGS links where available. EONET markers retain titles, geometry dates, source links, open/closed status, and storm intensity or track metadata where available.
-
-### AI View Analysis
-
-The codebase includes an experimental AI view-analysis flow, but the visible UI is disabled by `ASK_VIEW_VISIBLE = false`.
-
-When enabled, the flow can send:
-
-- the currently displayed image
-- selected coordinates and date
-- capture-time label
-- active satellite/provider/layer metadata
-- current bbox, zoom degrees, and rendered image dimensions
-
-The first request sends the current image. Follow-up requests keep chat history and a compact hidden view briefing so the image does not need to be resent each turn. Responses can stream through the local/API server-sent-events endpoint.
-
-Current model constants in `src/server/askView.ts`:
-
-- OpenAI: `gpt-5.2` through the Responses API
-- Anthropic: `claude-opus-4-1-20250805` through the Messages API
-
-Both provider requests include web-search tools where supported.
-
-## Getting Started
+```bash
+git clone <your-fork-or-repo-url>
+cd earth-view
+```
 
 Install dependencies:
 
@@ -171,155 +47,174 @@ Create a local environment file:
 cp .env.example .env
 ```
 
-For Sentinel support, fill in:
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Start the dev server:
+
+```bash
+npm run dev
+```
+
+Open the app at:
+
+```text
+http://127.0.0.1:5173
+```
+
+If you add or change `.env` values while the dev server is running, stop it and restart `npm run dev`.
+
+## Environment Variables
+
+`.env.example` contains all supported local variables:
 
 ```bash
 COPERNICUS_CLIENT_ID=
 COPERNICUS_CLIENT_SECRET=
-```
-
-For the hidden AI view-analysis endpoints, fill in one or both provider keys:
-
-```bash
 OPENAI_API_KEY=
 ANTHROPIC_API_KEY=
 ```
 
-Older Sentinel Hub variable names are also supported by the server code:
+All of these are optional for basic NASA GIBS usage. Do not prefix them with `VITE_`; they are read by the local/API server layer and should not be exposed to browser code.
+
+Older Sentinel Hub variable names are still accepted:
 
 ```bash
 SENTINELHUB_CLIENT_ID=
 SENTINELHUB_CLIENT_SECRET=
 ```
 
-Run the app:
+Prefer `COPERNICUS_CLIENT_ID` and `COPERNICUS_CLIENT_SECRET` for new setups.
+
+## Copernicus Sentinel Setup
+
+Sentinel support is optional, but it unlocks regional Sentinel-2 and Sentinel-1 imagery in the modal.
+
+1. Create a Copernicus Data Space Ecosystem account.
+2. Open the [Copernicus Data Space Sentinel Hub Dashboard](https://shapps.dataspace.copernicus.eu/dashboard/).
+3. Go to user settings and find the OAuth clients section.
+4. Create an OAuth client.
+5. Copy the client ID and client secret immediately. The secret may not be shown again after the dialog closes.
+6. Add them to `.env`:
 
 ```bash
-npm run dev
+COPERNICUS_CLIENT_ID=your_client_id
+COPERNICUS_CLIENT_SECRET=your_client_secret
 ```
 
-Vite serves the app on `127.0.0.1` by default.
+The app uses these credentials server-side to request access tokens from the Copernicus Data Space token endpoint, then calls the Sentinel Hub Process and Catalog APIs. The official authentication guide is here: [Sentinel Hub API authentication](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Overview/Authentication.html).
 
-## Scripts
+After saving `.env`, restart the dev server.
+
+## Ask AI Setup
+
+Ask AI is optional. It appears inside the modal and can analyze the currently displayed image with view context such as coordinates, date, imagery provider, bbox, scene metadata, and follow-up chat history.
+
+You can configure either provider or both.
+
+### OpenAI
+
+1. Create or open an OpenAI Platform account.
+2. Create an API key from the [OpenAI API keys page](https://platform.openai.com/api-keys).
+3. Add it to `.env`:
 
 ```bash
-npm run dev      # Start the Vite dev server with local API middleware
+OPENAI_API_KEY=your_openai_key
+```
+
+OpenAI's current quickstart is here: [OpenAI developer quickstart](https://platform.openai.com/docs/quickstart).
+
+### Anthropic
+
+1. Create or open a Claude Console account.
+2. Create an API key from the Claude Console account settings.
+3. Add it to `.env`:
+
+```bash
+ANTHROPIC_API_KEY=your_anthropic_key
+```
+
+Anthropic's current API overview is here: [Claude API overview](https://docs.anthropic.com/en/api/getting-started).
+
+After saving `.env`, restart the dev server.
+
+## How To Use The App
+
+On the globe:
+
+- Drag to orbit Earth.
+- Scroll or pinch to zoom around the cursor.
+- Use the imagery panel to switch base layers and manage overlays.
+- Toggle boundaries, labels, and activity overlays.
+- Zoom close to enter the detailed regional view.
+- Shift-click or right-click the globe or detailed view to open the modal.
+
+In the modal:
+
+- Drag to pan.
+- Scroll to cursor-zoom.
+- Shift-click to recenter.
+- Change the date or imagery layer from the sidebar.
+- Open Google Maps for the selected coordinate.
+- Build GIBS or Sentinel time lapses.
+- Use Ask AI when an OpenAI or Anthropic key is configured.
+
+## Available Scripts
+
+```bash
+npm run dev      # Start Vite with local API middleware
 npm run build    # Type-check and build the production bundle
 npm run preview  # Preview the production build locally
 npm run lint     # Run ESLint
 ```
 
-## Project Structure
+## Data Sources
 
-```text
-.
-|-- api/
-|   |-- ask-view.ts            # Vercel-style JSON endpoint for AI view analysis
-|   |-- ask-view-stream.ts     # Vercel-style SSE endpoint for streaming AI view analysis
-|   |-- sentinel-image.ts      # Vercel-style endpoint for Sentinel Process API image renders
-|   `-- sentinel-scenes.ts     # Vercel-style endpoint for Sentinel Catalog scene searches
-|-- src/
-|   |-- App.tsx                # Top-level app shell and globe/modal composition
-|   |-- main.tsx               # React entry point
-|   |-- components/
-|   |   |-- Globe/             # Three.js globe, overlays, labels, controls, max-zoom imagery
-|   |   |-- Modal/             # Imagery modal, hidden AI chat plumbing, hooks, time-lapse UI
-|   |   `-- ui/                # Small Radix/Tailwind UI primitives
-|   |-- lib/
-|   |   |-- captureTime.ts     # Estimated and exact capture-time formatting
-|   |   |-- cities.ts          # City label data
-|   |   |-- dates.ts           # Date helpers and latest-default imagery logic
-|   |   |-- geo.ts             # Coordinate, bbox, distance, and zoom math
-|   |   |-- gif.ts             # Browser-side animated GIF encoder
-|   |   |-- sentinelVariants.ts # Sentinel layer definitions and evalscripts
-|   |   `-- utils.ts           # Shared class-name utility
-|   |-- providers/
-|   |   |-- GibsProvider.ts    # NASA GIBS WMS URL builder/provider implementation
-|   |   |-- SentinelProvider.ts # Copernicus Sentinel regional provider implementation
-|   |   `-- registry.ts        # Registered imagery providers
-|   |-- server/
-|   |   |-- askView.ts         # AI prompts, provider calls, and streaming relay
-|   |   `-- sentinel.ts        # Sentinel auth, image requests, catalog searches, validation
-|   |-- store/
-|   |   `-- useAppStore.ts     # Zustand app state for globe, modal, layers, dates, requests
-|   |-- styles/
-|   |   `-- globals.css        # Tailwind imports, theme tokens, global styling
-|   `-- types/
-|       `-- imagery.ts         # Shared imagery provider and bbox types
-|-- vite.config.ts             # Vite config, path alias, and local API middleware
-|-- tailwind.config.ts         # Tailwind theme configuration
-|-- eslint.config.js           # ESLint flat config
-`-- package.json               # Scripts and dependencies
-```
+- [NASA GIBS](https://www.earthdata.nasa.gov/technology/gibs): global and regional MODIS/VIIRS imagery plus analytic overlays. No API key is required.
+- [Copernicus Data Space Ecosystem / Sentinel Hub APIs](https://documentation.dataspace.copernicus.eu/APIs/SentinelHub.html): optional Sentinel-2 and Sentinel-1 regional imagery. OAuth client credentials are required.
+- [USGS Earthquake Hazards Program](https://earthquake.usgs.gov/earthquakes/feed/): recent earthquake overlay.
+- [NASA EONET](https://eonet.gsfc.nasa.gov/): volcano and severe-storm event overlays.
+- [Natural Earth](https://www.naturalearthdata.com/): boundary context.
 
-## Architecture Notes
+## Deployment
 
-### Rendering Flow
+The app is a Vite SPA with serverless-style API handlers in `api/`.
 
-`src/components/Globe/Globe.tsx` owns the Three.js canvas. It builds global NASA GIBS texture URLs for globe-capable providers, renders the Earth sphere, applies optional transparent GIBS overlay textures, mounts boundary/city/event overlays, and reports camera-derived viewport information back to the Zustand store. Regional-only Sentinel providers keep the globe on a default global true-color texture while the modal renders the selected Sentinel layer.
+For a hosted deployment:
 
-Globe camera controls adapt interaction speed by camera distance. Scroll zoom and drag/pan slow down near the globe surface so close exploration is less sensitive, while wider globe navigation remains responsive.
+1. Install dependencies with `npm install`.
+2. Build with `npm run build`.
+3. Serve the generated `dist/` directory.
+4. Configure the same environment variables on the host for Sentinel and Ask AI features.
+5. Make sure the host supports the API routes in `api/` or adapt them to your server/runtime.
 
-`src/components/Globe/MaxZoomImagery.tsx` owns the max-zoom 2D overlay. It requests the regional image, handles cursor-anchored in-pass zoom, debounced image commits, detail overlay images, boundary overlay images, city labels, the Shift-click hint banner, and handoff back to globe zoom at the entry floor. While zoom mode is active, it ignores `globeView` updates to avoid a feedback loop.
+NASA GIBS-only functionality does not require server-side credentials, but Sentinel and Ask AI do.
 
-`src/store/useAppStore.ts` keeps normal globe focus/zoom requests separate from `globeDetailViewRequest`. That detail request is only for visually syncing the globe backdrop to the detailed overlay. It does not replace `focusGlobeAt` or `requestGlobeZoom`.
+## Troubleshooting
 
-`src/components/Globe/CameraHotkeys.tsx` owns the floating imagery panel, number-key layer switching, base imagery visibility, boundary visibility, GIBS overlay stack visibility, GIBS overlay stack controls, and activity overlay toggles.
+**The globe loads but Sentinel layers fail**
 
-`src/components/Globe/EventOverlays/` owns activity feed fetching and marker behavior.
+Check that `COPERNICUS_CLIENT_ID` and `COPERNICUS_CLIENT_SECRET` are set in `.env`, then restart the dev server. Also confirm the OAuth client is active in the Copernicus Data Space Sentinel Hub Dashboard.
 
-### Modal State
+**Ask AI is visible but requests fail**
 
-`src/components/Modal/ImageryModal.tsx` is the main inspection workspace. It owns the dialog layout, sidebar controls, Google Maps link, status badge placement, scene list, and modal-level state wiring.
+Set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY`, restart the dev server, and verify the provider account has billing/API access enabled.
 
-`src/components/Modal/hooks/useRegionalImagery.ts` owns pane-shaped regional image loading, object URL lifecycle, cursor zoom, drag pan, pending-view commits, and update reason reporting.
+**Environment variables are not being picked up**
 
-`src/components/Modal/hooks/useTimeLapse.ts` owns GIBS and Sentinel time-lapse orchestration. It keeps square time-lapse request bboxes separate from the live modal bbox so time-lapse playback remains geometrically consistent.
+Restart `npm run dev`. Vite and the local API middleware read `.env` at server startup.
 
-`src/components/Modal/TimeLapseModal.tsx` owns playback, frame stepping, keyboard stepping while paused, date labels, loading progress, and Sentinel GIF export.
+**Imagery appears stale for the current day**
 
-### Imagery Providers
+Some public satellite products lag behind real time. The app intentionally defaults to a recent likely complete VIIRS day to avoid requesting incomplete current-day true-color imagery.
 
-Regional imagery follows the interface in `src/types/imagery.ts`. `GibsProvider` produces WMS `GetMap` URLs and can be marked `overlayOnly` for analytic products. `SentinelProvider` implements the same interface by calling `/api/sentinel-image`.
+**The browser is sluggish**
 
-`src/providers/registry.ts` is the main place to add, remove, or reorder imagery. `modalImageryProviders` lists Sentinel providers first and then includes only non-overlay GIBS base imagery. Overlay-only products stay in the globe overlay selector.
+The globe uses large WebGL textures and can be demanding on older hardware. Try closing other GPU-heavy tabs or reducing browser zoom.
 
-### Server Layer
+## Project Notes
 
-`vite.config.ts` mounts local development middleware for:
-
-- `POST /api/sentinel-image`
-- `POST /api/sentinel-scenes`
-- `POST /api/ask-view`
-- `POST /api/ask-view-stream`
-
-The `api/` directory exposes Vercel-style handlers for the same server logic.
-
-NASA GIBS imagery, boundary GeoJSON, USGS earthquakes, and NASA EONET feeds are fetched directly by the browser. Sentinel and AI credentials are read only by the server/API layer and are never sent to the browser.
-
-## Adding A New Imagery Layer
-
-For a NASA GIBS WMS base layer:
-
-1. Add a `GibsProvider` entry in `src/providers/registry.ts`.
-2. Set `layerId`, display metadata, satellite, category, nominal resolution, summary, best-use note, and caveat.
-3. Leave `overlayOnly` unset so the layer can appear as base imagery.
-
-For a NASA GIBS overlay:
-
-1. Add a `GibsProvider` entry in `src/providers/registry.ts`.
-2. Set `overlayOnly: true`.
-3. Use `fixedDate` if the product has a known archive end date that should override the selected app date.
-
-For a Sentinel layer:
-
-1. Add a variant in `src/lib/sentinelVariants.ts`.
-2. Provide the collection, nominal resolution, request window, metadata, and evalscript.
-3. Confirm `src/server/sentinel.ts` supports the required collection-specific `dataFilter` and processing options.
-4. Register a `SentinelProvider` in `src/providers/registry.ts`.
-
-## Deployment Notes
-
-The app is a Vite SPA with serverless-style Sentinel and AI endpoints. Deployment environments must provide Copernicus credentials if Sentinel rendering should work, and AI provider keys if the hidden Ask View UI is enabled or the Ask View endpoints are called directly.
-
-`NOTES.md` contains short working notes and possible follow-up tasks. It is not required for running the app, but it is useful project context.
+The concise setup guide lives here in `README.md`. The fuller technical document is preserved as [README-extended.md](README-extended.md), including architecture notes, provider details, and implementation-oriented guidance.
