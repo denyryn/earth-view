@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getRecentIsoDates } from "@/lib/dates";
+import { clamp } from "@/lib/geo";
 import { getSentinelVariant } from "@/lib/sentinelVariants";
 import type { BoundingBox, ImageryProvider } from "@/types/imagery";
 import type { TimeLapseFrame } from "../TimeLapseModal";
@@ -30,6 +31,45 @@ type TimeLapseOptions = ManagedObjectUrl & {
   provider: ImageryProvider;
 };
 
+function centeredRange(center: number, span: number, min: number, max: number) {
+  const clampedSpan = Math.min(span, max - min);
+  let rangeMin = center - clampedSpan / 2;
+  let rangeMax = center + clampedSpan / 2;
+
+  if (rangeMin < min) {
+    rangeMax += min - rangeMin;
+    rangeMin = min;
+  }
+
+  if (rangeMax > max) {
+    rangeMin -= rangeMax - max;
+    rangeMax = max;
+  }
+
+  return {
+    min: clamp(rangeMin, min, max),
+    max: clamp(rangeMax, min, max),
+  };
+}
+
+function squareTimeLapseBbox(bbox: BoundingBox): BoundingBox {
+  const centerLat = (bbox.minLat + bbox.maxLat) / 2;
+  const centerLon = (bbox.minLon + bbox.maxLon) / 2;
+  const span = Math.max(
+    bbox.maxLat - bbox.minLat,
+    bbox.maxLon - bbox.minLon,
+  );
+  const latRange = centeredRange(centerLat, span, -85, 85);
+  const lonRange = centeredRange(centerLon, span, -180, 180);
+
+  return {
+    minLat: latRange.min,
+    maxLat: latRange.max,
+    minLon: lonRange.min,
+    maxLon: lonRange.max,
+  };
+}
+
 export function useTimeLapse({
   bbox,
   date,
@@ -49,6 +89,7 @@ export function useTimeLapse({
   } | null>(null);
   const [timeLapseError, setTimeLapseError] = useState<string | null>(null);
   const [timeLapseMode, setTimeLapseMode] = useState<TimeLapseMode>(7);
+  const requestBbox = useMemo(() => (bbox ? squareTimeLapseBbox(bbox) : null), [bbox]);
 
   const clearSentinelTimeLapseCache = useCallback(() => {
     for (const cached of sentinelTimeLapseCacheRef.current.values()) {
@@ -92,7 +133,7 @@ export function useTimeLapse({
   }, []);
 
   const getRegionalSentinelScope = useCallback(() => {
-    if (!bbox || !provider.sentinelVariantId) {
+    if (!requestBbox || !provider.sentinelVariantId) {
       return null;
     }
 
@@ -100,9 +141,9 @@ export function useTimeLapse({
       date,
       provider.id,
       provider.sentinelVariantId,
-      sentinelTimeLapseBboxKey(bbox),
+      sentinelTimeLapseBboxKey(requestBbox),
     ].join("|");
-  }, [bbox, date, provider.id, provider.sentinelVariantId]);
+  }, [date, provider.id, provider.sentinelVariantId, requestBbox]);
 
   useEffect(() => {
     const nextScope = getRegionalSentinelScope();
@@ -126,7 +167,7 @@ export function useTimeLapse({
   );
 
   async function loadTimeLapse(dayCount: 7 | 30) {
-    if (!bbox) {
+    if (!requestBbox) {
       return;
     }
 
@@ -142,7 +183,7 @@ export function useTimeLapse({
     const frames = await Promise.allSettled(
       frameDates.map(async (frameDate) => {
         const result = await provider.fetchImage({
-          bbox,
+          bbox: requestBbox,
           date: frameDate,
           signal: controller.signal,
           width: 1024,
@@ -358,7 +399,7 @@ export function useTimeLapse({
   }
 
   async function loadRegionalSentinelTimeLapse(dayCount: 7 | 30) {
-    if (!bbox || !provider.sentinelVariantId) {
+    if (!requestBbox || !provider.sentinelVariantId) {
       return;
     }
 
@@ -387,7 +428,7 @@ export function useTimeLapse({
 
     try {
       const scenes = await fetchSentinelScenesForWindow(
-        bbox,
+        requestBbox,
         variant.id,
         date,
         SENTINEL_SCENE_SEARCH_LIMIT,
@@ -395,7 +436,7 @@ export function useTimeLapse({
         controller.signal,
       );
       await renderSentinelTimeLapseFrames(scenes, dayCount, cacheKey, {
-        bbox,
+        bbox: requestBbox,
         variantId: variant.id,
       }, controller);
     } catch (sceneError) {
@@ -415,7 +456,7 @@ export function useTimeLapse({
   }
 
   async function loadRegionalSentinelFiveYearTimeLapse() {
-    if (!bbox || !provider.sentinelVariantId) {
+    if (!requestBbox || !provider.sentinelVariantId) {
       return;
     }
 
@@ -449,7 +490,7 @@ export function useTimeLapse({
       for (let index = 4; index >= 0; index -= 1) {
         const windowEndDate = addUtcYears(endDate, -index);
         const scenes = await fetchSentinelScenesForWindow(
-          bbox,
+          requestBbox,
           variant.id,
           isoDateFromDate(windowEndDate),
           SENTINEL_YEAR_SCENE_SEARCH_LIMIT,
@@ -467,7 +508,7 @@ export function useTimeLapse({
         SENTINEL_YEAR_SCENE_SAMPLE_SIZE * 5,
         cacheKey,
         {
-          bbox,
+          bbox: requestBbox,
           variantId: variant.id,
         },
         controller,

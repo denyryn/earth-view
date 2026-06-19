@@ -1,4 +1,4 @@
-import { Bot, Film, LoaderCircle, MapPinned, Satellite } from "lucide-react";
+import { Bot, ExternalLink, Film, LoaderCircle, MapPinned, Satellite } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
@@ -310,6 +310,9 @@ export function ImageryModal() {
   const coordinates = selectedPoint
     ? formatCoordinates(selectedPoint.lat, selectedPoint.lon)
     : "";
+  const googleMapsUrl = selectedPoint
+    ? `https://www.google.com/maps/search/?api=1&query=${selectedPoint.lat},${selectedPoint.lon}`
+    : "";
   const regionalCaptureLabel = formatGibsCaptureTime(date, provider.id, selectedLon);
   const acquiredScenes = regionalImagery.acquiredScenes;
   const hoveredScene = hoveredSceneDateTime
@@ -498,6 +501,15 @@ export function ImageryModal() {
               </DialogTitle>
               <DialogDescription>{captureLabel}</DialogDescription>
             </DialogHeader>
+
+            {selectedPoint && (
+              <Button asChild variant="outline" className="w-full justify-start">
+                <a href={googleMapsUrl} target="_blank" rel="noreferrer">
+                  <ExternalLink className="h-4 w-4" />
+                  Open in Google Maps
+                </a>
+              </Button>
+            )}
 
             <div className="rounded-md border border-border bg-background/45 p-4">
               <div className="mb-1 flex items-center gap-2 text-sm font-medium">
