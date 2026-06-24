@@ -6,8 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: earth-view-app
-    ports:
-      - "5173:3000"
+    expose:
+      - "3000"
     restart: unless-stopped
     environment:
       - COPERNICUS_CLIENT_ID=${COPERNICUS_CLIENT_ID:-}
